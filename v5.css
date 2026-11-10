@@ -80,10 +80,7 @@ p { margin: 0; }
 @media (max-width: 760px) { .bar-chapter, .bar-clock { display: none; } .bar { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; } .bar-mark { min-width: 0; } .bar-mark b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } }
 
 .ch { position: relative; }
-/* longe da tela o navegador pula layout e pintura destas seções; o tamanho estimado segura a rolagem
-   até a primeira vez que elas aparecem, e daí em diante vale o tamanho real que ele guardou */
-.civic { content-visibility: auto; contain-intrinsic-size: auto 2100px; }
-.board { content-visibility: auto; contain-intrinsic-size: auto 1400px; }
+
 
 
 /* 00 · abertura */
@@ -151,7 +148,7 @@ p { margin: 0; }
 .trip-intro h2 { font-size: clamp(3rem, 9.4vw, 9.6rem); line-height: .86; }
 .trip-intro h2 .ln { display: block; }
 .trip-intro .lead { margin-top: clamp(1.4rem, 3vw, 2.4rem); }
-.trip-run { position: relative; height: 860svh; }
+.trip-run { position: relative; height: 1080svh; }
 .trip-mark { position: absolute; left: 0; top: 56%; width: 1px; height: 1px; }
 .trip-stage { position: sticky; top: 0; height: 100svh; overflow: hidden; background: var(--ink); }
 #tripGL { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; transition: opacity 1.2s var(--ease); }
@@ -210,7 +207,7 @@ p { margin: 0; }
 .trip-rail button.on { color: var(--cream); }
 @media (hover: hover) and (pointer: fine) { .trip-rail button:hover { color: var(--cream); } }
 @media (max-width: 860px) {
-  .trip-run { height: 780svh; }
+  .trip-run { height: 960svh; }
   .trip-shade { background: linear-gradient(0deg, var(--ink) 36%, rgba(14, 13, 11, .8) 52%, rgba(14, 13, 11, 0) 70%); }
   .trip-caps { top: auto; bottom: 96px; left: var(--gut); right: var(--gut); width: auto; align-items: end; }
   .cap h3 { font-size: clamp(1.7rem, 7.4vw, 2.4rem); margin: .7rem 0 .7rem; }
@@ -442,27 +439,33 @@ p { margin: 0; }
 
 /* 07 · ferramentas */
 .tools { padding: clamp(64px, 8vw, 120px) 0 0; }
-.tools-run { position: relative; height: 300svh; margin-top: 1rem; }
-.tools-pin { position: sticky; top: 0; height: 100svh; display: flex; align-items: center; padding-top: var(--bar-h); overflow: clip; }
+.tools-run { position: relative; margin-top: 1rem; }
+/* o grafo é preso pelo ScrollTrigger (position: fixed durante a rolagem), que funciona igual no Safari e no Chrome */
+.tools-pin { position: relative; height: 100vh; display: flex; align-items: center; padding-top: var(--bar-h); overflow: hidden; }
 .tools-pin .wrap { display: flex; justify-content: center; }
 .tools-pin .graph { width: 100%; transform-origin: 50% 50%; }
 /* a esfera: os mesmos nomes, por cima do grafo, só transform e opacity por quadro */
 .sphere { position: absolute; left: 50%; top: 46%; width: 0; height: 0; pointer-events: none; opacity: 0; }
 .graph.morph .sphere { opacity: 1; }
-.sphere b { position: absolute; left: 0; top: 0; border-radius: 50%; opacity: 0; pointer-events: none; }
+.sphere > b { position: absolute; left: 0; top: 0; border-radius: 50%; opacity: 0; pointer-events: none; }
 .s-rim { transform: translate(-50%, -50%); border: 1px solid var(--line); background: radial-gradient(closest-side, rgba(var(--orange-rgb), .07), transparent 72%); }
 .s-eq { border: 1px dashed rgba(var(--orange-rgb), .45); }
-.sphere span { position: absolute; left: 0; top: 0; display: inline-flex; align-items: center; min-height: 34px; padding: 0 .8rem; white-space: nowrap; color: var(--cream); font: 500 .86rem var(--f-text); letter-spacing: -.01em; will-change: transform, opacity; }
-.sphere .sw { color: var(--orange); font-weight: 600; }
-@media (max-width: 860px) { .sphere span { min-height: 26px; padding: 0 .5rem; font-size: .7rem; } }
-.sphere i { position: absolute; inset: 0; z-index: -1; border-radius: 999px; border: 1px solid var(--line); background: var(--ink-2); }
-.graph.morph .g-col button, .graph.morph .g-say { opacity: 0 !important; pointer-events: none; transition: opacity .25s ease; }
-.graph.morph svg { opacity: 0; transition: opacity .4s ease; }
-.graph svg { transition: opacity .4s ease; }
+.sphere span { position: absolute; left: 0; top: 0; display: inline-flex; align-items: center; gap: .6rem; white-space: nowrap; color: var(--cream); will-change: transform, opacity; }
+.sphere .sw { min-height: 40px; padding: .35rem .9rem; font: 600 .98rem var(--f-text); letter-spacing: -.015em; }
+.sphere .st { min-height: 34px; padding: .25rem .8rem; font: 500 .78rem var(--f-mono); }
+.sphere b { font-weight: inherit; transition: color .4s ease; }
+.sphere small { margin-left: auto; color: var(--mute); font: .7rem var(--f-mono); }
+.sphere .sw.lit b { color: var(--orange); }
+.sphere em { position: absolute; inset: 0; z-index: -1; border-radius: 999px; border: 1px solid var(--line); background: var(--ink-2); }
+.graph.morph .g-col button { opacity: 0 !important; pointer-events: none; transition: none !important; }
+.graph.morph .g-say { opacity: 0; transition: opacity .25s ease; }
 .tools.flat .tools-run { height: auto; } .tools.flat .tools-pin { position: static; height: auto; padding-top: 0; }
 .tools h2 { margin-bottom: 1.2rem; }
 .graph { position: relative; display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.4fr) minmax(0, .8fr); margin-top: clamp(2rem, 5vw, 3.4rem); }
-.graph svg { grid-column: 2; grid-row: 1; width: 100%; height: 100%; overflow: visible; }
+/* as linhas ficam num SVG absoluto dentro da coluna do meio: ele nunca entra na conta da altura do grafo.
+   Solto na grade com height: 100%, o Safari tirava a altura do viewBox e o grafo crescia sem parar a cada redesenho */
+.g-mid { grid-column: 2; grid-row: 1; position: relative; min-width: 0; }
+.graph svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 /* as linhas se desenham uma vez, depois dos nós; o "ready" tira os atrasos da entrada */
 .link { fill: none; stroke: var(--line-2); stroke-width: 1; stroke-dasharray: 1; stroke-dashoffset: 1; transition: stroke-dashoffset .9s var(--ease) calc(.45s + var(--k) * 22ms), stroke .3s, opacity .3s; }
 .graph.in .link { stroke-dashoffset: 0; }
@@ -485,21 +488,31 @@ p { margin: 0; }
 .graph.in .g-left button.on { transform: translateX(6px); }
 .graph.in .g-right button.on { transform: translateX(-6px); }
 .graph.focus .g-col button:not(.on) { opacity: .35; }
-.g-say { grid-column: 1 / -1; min-height: 3.2em; margin-top: 1.6rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--mute); font: .8rem/1.6 var(--f-mono); }
+/* altura fixa: o texto muda a cada trabalho, e o grafo (grudado e centrado na tela) não pode pular junto */
+.g-say { grid-column: 1 / -1; height: calc(3 * 1.6em + 1rem); margin-top: 1.6rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--mute); font: .8rem/1.6 var(--f-mono); overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 @media (max-width: 860px) {
   .graph { grid-template-columns: minmax(0, 1fr) clamp(28px, 18vw, 180px) auto; }
   .g-left button { font-size: .86rem; padding: .35rem .7rem; border-radius: 14px; line-height: 1.2; }
   .g-right button { font-size: .7rem; padding: .2rem .6rem; min-height: 30px; }
   .g-col button { gap: .4rem; }
+  /* a esfera copia o botão também no celular */
+  .sphere span { gap: .4rem; }
+  .sphere .sw { font-size: .86rem; padding: .35rem .7rem; line-height: 1.2; white-space: normal; }
+  .sphere .sw em { border-radius: 14px; }
+  .sphere .st { font-size: .7rem; padding: .2rem .6rem; min-height: 30px; }
 }
 /* tela larga e baixa: a coluna de ferramentas cabe inteira na altura */
 @media (min-width: 861px) and (max-height: 980px) and (pointer: fine) {
   .g-right { gap: 3px; }
   .g-right button { min-height: 28px; padding: .15rem .75rem; }
+  .sphere .st { min-height: 28px; padding: .15rem .75rem; }
 }
 
 /* 08 · ponto final */
 .end { padding: clamp(64px, 8vw, 120px) 0 clamp(56px, 7vw, 100px); border-top: 1px solid var(--line); }
+/* o contato sobe por cima da esfera, que continua grudada e girando no mesmo lugar */
+.sc .end { position: relative; z-index: 2; margin-top: -100vh; background: var(--ink); box-shadow: 0 -40px 80px rgba(14, 13, 11, .85); }
+.sc .tools-pin { z-index: 1; }
 .end-big { margin-bottom: clamp(2rem, 5vw, 4rem); font: 800 clamp(4.2rem, 15vw, 15rem)/.84 var(--f-display); font-variation-settings: "wdth" 80, "opsz" 96; letter-spacing: -.035em; }
 .end-big .ln { display: inline-block; vertical-align: top; }
 .end-grid { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.4fr); gap: 2rem 5rem; padding-top: 2rem; border-top: 1px solid var(--line-2); }

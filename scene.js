@@ -121,9 +121,32 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
   const useMap = tex => {
     tex.anisotropy = renderer.capabilities.getMaxAnisotropy(); tex.colorSpace = THREE.SRGBColorSpace;
     mapMat.map = tex; mapMat.needsUpdate = true; map.visible = true;
-    mapMats.forEach(m => { m.map = tex; m.needsUpdate = true; });
+    if (!cropTex) mapMats.forEach(m => { m.map = tex; m.needsUpdate = true; });
     renderer.initTexture(tex); warm();
   };
+  // as lâminas mostram só o recorte do Centro e de Icaraí: ele ganha uma textura própria, desenhada do SVG
+  // só naquela janela (2048 px para 460 do mapa, quatro vezes mais nítida que o recorte da textura inteira)
+  let cropTex = null;
+  const buildCrop = () => fetch(mapSrc).then(r => r.text()).then(t => {
+    const svgTxt = t.replace(/viewBox="[^"]*"/, `viewBox="${CROP.x} ${CROP.y} ${CROP.s} ${CROP.s}" width="2048" height="2048"`)
+      .replace(/stroke-width="([0-9.]+)"/g, (_, w) => `stroke-width="${(+w * 0.42).toFixed(2)}"`);
+    const url = URL.createObjectURL(new Blob([svgTxt], { type: "image/svg+xml" }));
+    const im = new Image();
+    im.onload = () => (window.requestIdleCallback || setTimeout)(() => {
+      try {
+        const c = document.createElement("canvas"); c.width = c.height = 2048;
+        const x = c.getContext("2d"); x.drawImage(im, 0, 0, 2048, 2048);
+        x.globalCompositeOperation = "source-in"; x.fillStyle = "#fff"; x.fillRect(0, 0, 2048, 2048);
+        cropTex = new THREE.CanvasTexture(c);
+        cropTex.anisotropy = renderer.capabilities.getMaxAnisotropy(); cropTex.colorSpace = THREE.SRGBColorSpace;
+        mapPlates.forEach(m => { m.geometry = plateGeo; });
+        mapMats.forEach(m => { m.map = cropTex; m.needsUpdate = true; });
+        renderer.initTexture(cropTex); warm();
+      } catch (e) { /* fica a textura do mapa inteiro */ }
+      URL.revokeObjectURL(url);
+    });
+    im.src = url;
+  }).catch(() => {});
   // o SVG é rasterizado num momento ocioso (a cena inteira já é montada fora da rolagem)
   const img = new Image();
   img.onload = () => (window.requestIdleCallback || setTimeout)(() => {
@@ -136,6 +159,7 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
     } catch (e) { /* sem o mapa, os pontos seguem sozinhos */ }
   });
   img.src = mapSrc;
+  buildCrop();
 
   const gridPts = [];
   for (let i = -12; i <= 12; i++) { gridPts.push(i * 0.5, 0, -6, i * 0.5, 0, 6, -6, 0, i * 0.5, 6, 0, i * 0.5); }
@@ -164,7 +188,7 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
   });
   const ptsOf = list => { const a = []; list.forEach(([x, y]) => { if (inCrop(x, y)) a.push(wx(x), 0.02, wz(y)); }); const bg = new THREE.BufferGeometry(); bg.setAttribute("position", new THREE.Float32BufferAttribute(a, 3)); return bg; };
   const stack = new THREE.Group(); scene.add(stack); stack.visible = false;
-  const mapMats = [];
+  const mapMats = [], mapPlates = [];
   let wazeMat = null, wazePts = null;
   const fades = [];   // [material, opacidade cheia, é uniform?, camada]
   const groups = [], plates = [];
@@ -181,7 +205,7 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
     for (let k = 0; k < uv.count; k++) uv.setXY(k, u0 + uv.getX(k) * (u1 - u0), v0 + uv.getY(k) * (v1 - v0)); }
   const inCropW = (x, z) => x > crop.x0 + 0.05 && x < crop.x1 - 0.05 && z > crop.z0 + 0.05 && z < crop.z1 - 0.05;
   const uTime = uni.uTime;
-  let jamGroup = null, jamMat = [], bld = null;
+  let jamGroup = null, jamMat = [], bld = null, busTick = null;
 
   layers.forEach((l, i) => {
     const gr = new THREE.Group();
@@ -189,7 +213,7 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
     const plate = new THREE.Mesh(plateGeo, pm); plate.position.set(crop.cx, 0, crop.cz); plate.renderOrder = i * 3; plate.userData.k = i;
     const mm = new THREE.MeshBasicMaterial({ color: CREAM, map: null, transparent: true, opacity: 0, depthWrite: false });
     const mapPlate = new THREE.Mesh(cg, mm); mapPlate.position.set(crop.cx, 0.004, crop.cz); mapPlate.renderOrder = i * 3 + 1;
-    mapMats.push(mm);
+    mapMats.push(mm); mapPlates.push(mapPlate);
     const em = new THREE.LineBasicMaterial({ color: l.mine ? ORANGE : 0xc9a96b, transparent: true, opacity: 0, depthWrite: false });
     const loop = new THREE.LineLoop(edge, em); loop.renderOrder = i * 3 + 2;
     const side = new THREE.LineSegments(slab, em); side.renderOrder = i * 3 + 2;
@@ -251,14 +275,40 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
       add(im, km, 0.22);
       const m = markMat(CREAM, 1.6, 2); add(new THREE.Points(ptsOf(geo.cams).translate(0, 0.03, 0), m), m, 0.95, true);
     } else if (i === 3) {
-      // ônibus: as linhas como tubos, na posição real das rotas
-      const tm = new THREE.MeshLambertMaterial({ color: TEAL, emissive: 0x0d3a33, transparent: true, opacity: 0 });
+      // ônibus: o traçado real das rotas, fino, e alguns ônibus 3D (ilustrativos) indo e voltando por ele
+      const lm = new THREE.LineBasicMaterial({ color: TEAL, transparent: true, opacity: 0, depthWrite: false });
+      const bodyM = new THREE.MeshLambertMaterial({ color: 0x7fe3d2, emissive: 0x123f38, transparent: true, opacity: 0 });
+      const glassM = new THREE.MeshLambertMaterial({ color: 0x0f1c1a, emissive: 0x0a1412, transparent: true, opacity: 0 });
+      const curves = [];
       geo.routes.forEach(r => {
-        const seg = []; r.p.forEach(([x, y]) => { if (inCrop(x, y)) seg.push(new THREE.Vector3(wx(x), 0.03, wz(y))); });
+        const seg = []; r.p.forEach(([x, y]) => { if (inCrop(x, y)) seg.push(new THREE.Vector3(wx(x), 0.012, wz(y))); });
         if (seg.length < 2) return;
         const curve = new THREE.CatmullRomCurve3(seg, false, "centripetal", 0.2);
-        add(new THREE.Mesh(new THREE.TubeGeometry(curve, Math.min(220, seg.length * 3), 0.016, 6, false), tm), tm, 0.92);
+        const len = curve.getLength(); if (len < 0.3) return;
+        curves.push({ curve, len });
+        const pts = curve.getSpacedPoints(Math.min(400, Math.ceil(len * 60)));
+        add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lm), lm, 0.55);
       });
+      // até 16 ônibus: dois por rota, em sentidos e pontos de partida diferentes
+      const fleet = [];
+      curves.forEach((c, k) => { for (let j = 0; j < 2 && fleet.length < 16; j++) fleet.push({ ...c, off: (k * 0.37 + j * 0.5) % 1, v: 0.09 / c.len * (0.8 + ((k + j) % 3) * 0.15) }); });
+      if (fleet.length) {
+        const body = new THREE.BoxGeometry(0.13, 0.042, 0.048); body.translate(0, 0.021 + 0.012, 0);
+        const glass = new THREE.BoxGeometry(0.118, 0.013, 0.0496); glass.translate(0, 0.03 + 0.012, 0);
+        const bi = add(new THREE.InstancedMesh(body, bodyM, fleet.length), bodyM, 1);
+        const gi = add(new THREE.InstancedMesh(glass, glassM, fleet.length), glassM, 1);
+        const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), upv = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3(), tg = new THREE.Vector3();
+        busTick = time => {
+          fleet.forEach((b, k) => {
+            const w = (b.off + time * b.v) % 2, u = w < 1 ? w : 2 - w;     // vai e volta pela rota
+            b.curve.getPointAt(Math.min(0.999, Math.max(0.001, u)), p); b.curve.getTangentAt(Math.min(0.999, Math.max(0.001, u)), tg);
+            q.setFromAxisAngle(upv, Math.atan2(-tg.z, tg.x));
+            m4.compose(p, q, one); bi.setMatrixAt(k, m4); gi.setMatrixAt(k, m4);
+          });
+          bi.instanceMatrix.needsUpdate = gi.instanceMatrix.needsUpdate = true;
+        };
+        busTick(0);
+      }
     } else if (i === 4) {
       // trânsito: os trechos do Waze em fitas que sobem e esquentam com o nível (1 a 5); os alertas por cima
       jamGroup = new THREE.Group(); gr.add(jamGroup);
@@ -344,9 +394,16 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
     else if (fast > 240 && dpr < dprMax) next = Math.min(dprMax, dpr + 0.25);
     if (next !== dpr) { dpr = next; slow = fast = 0; renderer.setPixelRatio(dpr); renderer.setSize(W, H, false); uni.uPx.value = H * dpr * 0.085; }
   };
+  // amortecimento: uma rolada brusca não vira um salto de câmera; a cena chega ao alvo em ~meio segundo
+  let tState = 0, tExplode = 0, first = true, lastF = 0;
   const frame = now => {
     raf = requestAnimationFrame(frame);
     adapt(now);
+    const dtF = lastF ? Math.min(0.1, (now - lastF) / 1000) : 0.016; lastF = now;
+    const kF = 1 - Math.exp(-dtF * 4.5);
+    state += (tState - state) * kF; explode += (tExplode - explode) * kF;
+    if (Math.abs(tState - state) < 0.0005) state = tState;
+    if (Math.abs(tExplode - explode) < 0.0005) explode = tExplode;
     const time = (now - t0) / 1000;
     uni.uTime.value = time;
     uni.uS.value = Math.min(4, state);
@@ -381,6 +438,7 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
         if (u) m.uniforms.uO.value = v; else m.opacity = v;
       });
       uni.uDim.value = hl[LN - 1];
+      if (busTick && o > 0.01) busTick(time);
       wire.scale.y = Math.max(0.001, (LN - 1) * GAP * e); wireMat.opacity = 0.9 * ss(0.4, 1, e);
     }
     renderer.render(scene, camera);
@@ -423,7 +481,8 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
   warm();
   return {
     ready: () => warming,
-    set(s, e) { state = s; explode = e; },
+    // a rolagem só diz para onde ir; quem anda até lá é a cena, no próprio ritmo (ver o começo do frame)
+    set(s, e) { tState = s; tExplode = e; if (first) { first = false; state = s; explode = e; } },
     setBikes() {
       stations.forEach((s, i) => { const f = s.bikes == null ? 0.5 : Math.min(1, s.bikes / Math.max(1, s.cap)); for (let k = 0; k < S; k++) aFill[i * S + k] = f; });
       g.attributes.aFill.needsUpdate = true;
@@ -438,7 +497,7 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
     },
     // -1 tira o destaque
     focus(k) { focus = k; },
-    start() { if (raf) return; last = 0; raf = requestAnimationFrame(frame); addEventListener("pointermove", onMove, { passive: true }); addEventListener("pointerdown", onDown, { passive: true }); },
+    start() { if (raf) return; last = 0; lastF = 0; raf = requestAnimationFrame(frame); addEventListener("pointermove", onMove, { passive: true }); addEventListener("pointerdown", onDown, { passive: true }); },
     stop() { cancelAnimationFrame(raf); raf = 0; removeEventListener("pointermove", onMove); removeEventListener("pointerdown", onDown); },
     resize,
   };

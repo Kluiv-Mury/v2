@@ -13,12 +13,16 @@
 
   /* ---------- rolagem suave: Lenis no relógio do GSAP ---------- */
   let lenis = null;
-  if (hasGsap && window.Lenis && !reduce) {
+  // no Safari a rolagem nativa do trackpad já é suave, e o Lenis por cima briga com o position: sticky
+  // (as cenas grudadas tremem e escorregam): lá fica a rolagem do próprio navegador
+  const safari = /^((?!chrome|android|crios|fxios|edg).)*safari/i.test(navigator.userAgent);
+  if (hasGsap && window.Lenis && !reduce && !safari) {
     lenis = new Lenis({ lerp: 0.11, wheelMultiplier: 1, smoothWheel: true });
     lenis.on("scroll", ScrollTrigger.update);
     gsap.ticker.add(t => lenis.raf(t * 1000));
     gsap.ticker.lagSmoothing(0);
   }
+  window.__lenis = lenis;   // o laboratório (iframe) só repassa a roda do mouse quando a página usa o Lenis
   const go = id => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -182,7 +186,7 @@
       p: `O Gêmeo Digital de Niterói junta dados oficiais em tempo real para planejar e monitorar a cidade. Eu cuido do trânsito e do NitBike.`,
       hud: `<ol class="cap-layers">${lay.slice().reverse().map((l, i) => `<li class="${l.mine ? "mine" : ""}" data-layer="${LN - 1 - i}" tabindex="0"><b>${l.name}</b> ${l.source}</li>`).join("")}</ol>
         <a class="pill pill-line" href="https://gemeo.niteroi.rj.gov.br/" target="_blank" rel="noopener noreferrer">Abrir o Gêmeo Digital ↗</a>
-        <p class="cap-note">Posições reais das camadas públicas, no recorte do Centro e de Icaraí. Trânsito e bikes lidos agora; prédios do OpenStreetMap, com a altura exagerada; a altura e as gotas da chuva são ilustrativas.</p>`, keep: true },
+        <p class="cap-note">Posições reais das camadas públicas, no recorte do Centro e de Icaraí. Trânsito e bikes lidos agora; prédios do OpenStreetMap, com a altura exagerada. São ilustrativos os ônibus andando e a altura e as gotas da chuva.</p>`, keep: true },
   ];
   $("#tripCaps").innerHTML = CAPS.map((c, i) => `<article class="cap" id="cap-${i}"><span class="cap-k"><b>0${i + 1}</b>/0${CAPS.length} · ${c.t}<i>${c.k}</i></span><h3>${c.h}</h3><p>${c.p}</p><div class="cap-hud${c.keep ? " keep" : ""}">${c.hud}</div></article>`).join("");
   $("#tripRail").innerHTML = CAPS.map((c, i) => `<button type="button" aria-label="Etapa ${i + 1}: ${c.t}"><i class="rl"><i></i></i><span>0${i + 1}</span><b>${c.t}</b></button>`).join("");
@@ -234,13 +238,24 @@
     layEls.forEach(el => el.classList.toggle("hot", +el.dataset.layer === k));
     if (trip) trip.focus(k);
   }
+  // pular a rolagem para um ponto, sem animação (o que está grudado na tela não se mexe)
+  const jumpTo = y => { if (lenis) lenis.scrollTo(y, { immediate: true, force: true }); else scrollTo(0, y); };
+  // quando a pessoa escolhe uma camada (mouse, toque ou teclado), a rolagem vai para o ponto daquela camada:
+  // assim, ao voltar a rolar, a sequência continua de onde ela estava olhando, e não do começo
+  const userLayer = k => {
+    if (k < 0) { focusLayer(sweepAt); return; }
+    focusLayer(k);
+    if (!tripST || !tripST.isActive || tripP < 0.66) return;
+    const p = 0.71 + (LN - 1 - k + 0.5) / LN * 0.26;
+    sweepAt = k; jumpTo(tripST.start + (tripST.end - tripST.start) * p);
+  };
   layEls.forEach(el => {
     const k = +el.dataset.layer;
-    el.addEventListener("pointerenter", e => { if (e.pointerType === "mouse") focusLayer(k); });
-    el.addEventListener("pointerleave", e => { if (e.pointerType === "mouse") focusLayer(-1); });
-    el.addEventListener("focus", () => focusLayer(k));
-    el.addEventListener("blur", () => focusLayer(-1));
-    el.addEventListener("click", () => focusLayer(layAt === k ? -1 : k));
+    el.addEventListener("pointerenter", e => { if (e.pointerType === "mouse") userLayer(k); });
+    el.addEventListener("pointerleave", e => { if (e.pointerType === "mouse") userLayer(-1); });
+    el.addEventListener("focus", () => userLayer(k));
+    el.addEventListener("blur", () => userLayer(-1));
+    el.addEventListener("click", () => userLayer(k));
   });
 
   function tripLive() {
@@ -302,8 +317,8 @@
       if (live.length >= 12) return setJams(live, "agora");
       return fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, `retrato · ${new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date(s.retrato))}`));
     }).catch(() => fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, "retrato")).catch(() => {}));
-    import("./scene.js").then(m => {
-      trip = m.createTrip({ canvas: $("#tripGL"), stations: [...stations.values()], term, geo: window.KMGEO || { cams: [], gauges: [], routes: [] }, layers: lay, mapSrc: "mapa-niteroi.svg", tagEls: tripTags, onFocus: focusLayer });
+    import("./scene.js?v=202611101135").then(m => {
+      trip = m.createTrip({ canvas: $("#tripGL"), stations: [...stations.values()], term, geo: window.KMGEO || { cams: [], gauges: [], routes: [] }, layers: lay, mapSrc: "mapa-niteroi.svg", tagEls: tripTags, onFocus: userLayer });
       trip.setBikes(); if (wazePts) trip.setWaze(wazePts); if (jams) paintJams();
       tripTo(tripP);
       if (tripVisible) trip.start();
@@ -349,7 +364,7 @@
   const loadLab = () => {
     if (labOn) return; labOn = true;
     const f = document.createElement("iframe");
-    f.src = "lab.html"; f.title = "Gêmeo simplificado e pipeline do NitBike";
+    f.src = "lab.html?v=202611101135"; f.title = "Gêmeo simplificado e pipeline do NitBike";
     labFrame.innerHTML = ""; labFrame.appendChild(f);
   };
   addEventListener("load", () => setTimeout(() => idle(loadLab, { timeout: 4000 }), 3200));
@@ -358,14 +373,20 @@
   // o quadro é do mesmo site, então o navegador não o pausa sozinho: longe da tela, ele para de animar
   let labNear = false;
   const labPause = () => { const f = $("iframe", labFrame); if (f && f.contentWindow) f.contentWindow.postMessage({ type: "lab-pause", on: !labNear }, location.origin); };
-  new IntersectionObserver(([e]) => { labNear = e.isIntersecting; labPause(); }, { rootMargin: "40% 0px" }).observe(labFrame);
+  new IntersectionObserver(([e]) => {
+    labNear = e.isIntersecting; labPause();
+    if (labNear && labPending) { labH = labPending; labPending = 0; labFrame.style.setProperty("--h", `${labH}px`); if (hasGsap) ScrollTrigger.refresh(); }
+  }, { rootMargin: "40% 0px" }).observe(labFrame);
   labFrame.addEventListener("load", labPause, true);
   // a altura do quadro muda muitas vezes enquanto o React monta: o refresh só roda quando ela assenta
-  let labH = 0, labT = 0;
+  let labH = 0, labT = 0, labPending = 0;
   addEventListener("message", e => {
     if (e.origin !== location.origin || !e.data || e.data.type !== "lab-height") return;
     const nh = Math.ceil(e.data.h);
     if (Math.abs(nh - labH) <= 2) return;
+    // longe da tela a altura do quadro não muda: sem isso, no Safari (que não compensa a rolagem
+    // quando algo acima cresce) a página inteira pulava enquanto a pessoa estava mais embaixo
+    if (labH && !labNear) { labPending = nh; return; }
     labH = nh; labFrame.style.setProperty("--h", `${nh}px`);
     if (hasGsap) { clearTimeout(labT); labT = setTimeout(() => ScrollTrigger.refresh(), 220); }
   });
@@ -477,7 +498,7 @@
   const techs = [...new Set(D.works.flatMap(w => w.tech))].sort((a, b) => D.works.filter(w => w.tech.includes(b)).length - D.works.filter(w => w.tech.includes(a)).length || a.localeCompare(b));
   const uses = t => D.works.filter(w => w.tech.includes(t)).length;
   const SAY0 = `${D.works.length} trabalhos · ${techs.length} ferramentas · ${D.works.reduce((n, w) => n + w.tech.length, 0)} ligações`;
-  graph.innerHTML = `<div class="g-col g-left">${D.works.map((w, i) => `<button type="button" data-w="${w.id}" style="--k:${i};--dx:-14px">${w.label}<i>${w.tech.length}</i></button>`).join("")}</div><svg aria-hidden="true"></svg><div class="g-col g-right">${techs.map((t, i) => `<button type="button" data-t="${t}" style="--k:${i};--dx:14px">${t}<i>${uses(t)}</i></button>`).join("")}</div><p class="g-say" id="gSay">${SAY0}</p>`;
+  graph.innerHTML = `<div class="g-col g-left">${D.works.map((w, i) => `<button type="button" data-w="${w.id}" style="--k:${i};--dx:-14px">${w.label}<i>${w.tech.length}</i></button>`).join("")}</div><div class="g-mid"><svg aria-hidden="true" preserveAspectRatio="none"></svg></div><div class="g-col g-right">${techs.map((t, i) => `<button type="button" data-t="${t}" style="--k:${i};--dx:14px">${t}<i>${uses(t)}</i></button>`).join("")}</div><p class="g-say" id="gSay">${SAY0}</p>`;
   const gsvg = $("svg", graph), gSay = $("#gSay");
   let gCur = [];
   const drawGraph = () => {
@@ -514,11 +535,12 @@
   const hands = () => { if (touched) return; touched = true; stopTour(); };
   $$(".g-col button", graph).forEach(b => {
     const attr = b.dataset.w ? "w" : "t", val = b.dataset.w || b.dataset.t;
-    b.addEventListener("pointerenter", e => { if (e.pointerType === "mouse") { hands(); focusGraph(attr, val); } });
-    b.addEventListener("focus", () => { hands(); focusGraph(attr, val); });
-    b.addEventListener("click", () => { hands(); focusGraph(attr, b.classList.contains("on") && graph.dataset.sel === val ? (graph.dataset.sel = "", null) : (graph.dataset.sel = val, val)); });
+    b.addEventListener("pointerenter", e => { if (e.pointerType === "mouse") { hands(); focusGraph(attr, val); syncWork(attr, val); } });
+    b.addEventListener("focus", () => { hands(); focusGraph(attr, val); syncWork(attr, val); });
+    b.addEventListener("click", () => { hands(); focusGraph(attr, b.classList.contains("on") && graph.dataset.sel === val ? (graph.dataset.sel = "", null) : (graph.dataset.sel = val, val)); syncWork(attr, val); });
   });
-  graph.addEventListener("pointerleave", () => { if (touched && !graph.dataset.sel) focusGraph(); });
+  // ao sair com o mouse, volta o destaque que a rolagem tinha escolhido (ou nenhum)
+  graph.addEventListener("pointerleave", () => { if (touched && !graph.dataset.sel) focusGraph("w", toolsAt >= 0 ? D.works[toolsAt].id : null); });
   drawGraph();
   // redesenha quando os botões mudam de tamanho (fontes, largura) e quando o grafo aparece
   const graphRO = new ResizeObserver(() => requestAnimationFrame(drawGraph));
@@ -529,10 +551,11 @@
     if (!graph.classList.contains("in")) {
       // os nós entram, depois as linhas se desenham; o "ready" tira os atrasos da entrada
       requestAnimationFrame(() => graph.classList.add("in"));
-      setTimeout(() => graph.classList.add("ready"), 1700);
+      setTimeout(() => graph.classList.add("ready"), 1500);
     }
     if (!touched && !reduce && !tour) tour = setInterval(() => focusGraph("w", D.works[tourI++ % D.works.length].id), 2600);
-  }, { threshold: 0.25 }).observe(graph);
+    // a entrada começa assim que o grafo aponta na tela, para já estar desenhado quando ele gruda
+  }, { threshold: 0, rootMargin: "0px 0px -10% 0px" }).observe(graph);
   document.fonts && document.fonts.ready.then(drawGraph);
 
   // o grafo cabe sempre na altura da tela enquanto está grudado (o SVG acompanha a escala sozinho)
@@ -545,9 +568,10 @@
   /* a esfera: no fim da seção cada nome sai do lugar dele no grafo e vira um ponto de uma esfera que gira */
   const sph = h("div", "sphere"); sph.setAttribute("aria-hidden", "true");
   const sBtns = $$(".g-col button", graph);
-  sph.innerHTML = sBtns.map(b => `<span class="${b.dataset.w ? "sw" : "st"}"><i></i>${b.firstChild.textContent}</span>`).join("");
+  // cada nome da esfera nasce como cópia exata do botão (mesma pílula, mesmo número): a troca não se vê
+  sph.innerHTML = sBtns.map(b => `<span class="${b.dataset.w ? "sw" : "st"}"><em></em><b>${b.firstChild.textContent}</b><small>${b.querySelector("i").textContent}</small></span>`).join("");
   graph.appendChild(sph);
-  const sEls = $$("span", sph), sPill = sEls.map(s => s.firstChild);
+  const sEls = $$("span", sph), sPill = sEls.map(s => s.firstChild), sNum = sEls.map(s => s.lastChild), gSvg = $("svg", graph);
   const NS_ = sEls.length, GA = Math.PI * (3 - Math.sqrt(5));
   // pontos espalhados por igual (espiral de Fibonacci); os trabalhos ficam numa faixa, as ferramentas no resto
   // a ordem salta de 11 em 11 para os trabalhos (laranja) não se juntarem num polo só
@@ -555,48 +579,72 @@
   // o contorno e o equador desenham a esfera mesmo onde não há nome
   sph.insertAdjacentHTML("afterbegin", `<b class="s-rim"></b><b class="s-eq"></b>`);
   const sRim = $(".s-rim", sph), sEq = $(".s-eq", sph);
-  let sFrom = null, sM = 0, sAng = 0, sRaf = 0, sLast = 0, sR = 200;
+  let sFrom = null, sM = 0, sT = 0, sAng = 0, sRaf = 0, sLast = 0, sR = 200;
   const sMeasure = () => {
     const g = graph.getBoundingClientRect(), sc = g.width / graph.offsetWidth || 1;
     sR = wide() ? Math.min(graph.offsetWidth * 0.36, graph.offsetHeight * 0.4) : Math.min(graph.offsetWidth * 0.36, graph.offsetHeight * 0.42);
     [sRim, sEq].forEach(el => { el.style.width = el.style.height = `${(sR * 2).toFixed(0)}px`; });
-    sFrom = sBtns.map(b => { const r = b.getBoundingClientRect(); return [(r.left + r.width / 2 - g.left - g.width / 2) / sc, (r.top + r.height / 2 - g.top - g.height / 2) / sc]; });
+    // posição de partida: o centro de cada botão, medido a partir da origem da esfera (e não do centro do grafo)
+    const o = sph.getBoundingClientRect();
+    sFrom = sBtns.map((b, i) => { const r = b.getBoundingClientRect(); sEls[i].style.width = `${b.offsetWidth}px`; return [(r.left + r.width / 2 - o.left) / sc, (r.top + r.height / 2 - o.top) / sc]; });
   };
   const ease = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
   const sDraw = now => {
     const dt = sLast ? Math.min(0.05, (now - sLast) / 1000) : 0; sLast = now;
-    sAng += dt * 0.32 * ss(0.5, 1, sM);
+    // amortecimento: a rolagem só marca o alvo (sT); a transformação anda até ele no próprio ritmo
+    sM += (sT - sM) * (1 - Math.exp(-dt * 3.2));
+    if (Math.abs(sT - sM) < 0.0008) sM = sT;
+    graph.classList.toggle("morph", sM > 0);
+    gSvg.style.opacity = sM > 0 ? (1 - ss(0, 0.2, sM)).toFixed(3) : "";
+    if (sM <= 0 && sT <= 0) { cancelAnimationFrame(sRaf); sRaf = 0; sFrom = null; return false; }
+    sAng += dt * 0.32 * ss(0.25, 0.6, sM);
     const ca = Math.cos(sAng), sa = Math.sin(sAng), tx = 0.32, cx = Math.cos(tx), sx = Math.sin(tx);
+    // três tempos: as linhas somem (até 0,2); os nomes entram numa órbita (o equador da esfera, já girando);
+    // a órbita se abre e vira a esfera. Tudo é a mesma rotação, então não há salto entre um tempo e outro
     for (let i = 0; i < NS_; i++) {
-      const e = ease(Math.min(1, Math.max(0, (sM - i / NS_ * 0.35) / 0.65)));
-      const [dx, dy, dz] = sDir[i];
+      const d = i / NS_ * 0.06;
+      const e1 = ease(Math.min(1, Math.max(0, (sM - 0.2 - d) / 0.38)));
+      const e2 = ease(Math.min(1, Math.max(0, (sM - 0.6 - d) / 0.34)));
+      // na órbita a ordem também salta de 11 em 11, para os trabalhos (laranja) ficarem espalhados no anel
+      const th = ((i * 11) % NS_) / NS_ * Math.PI * 2, [sx0, sy0, sz0] = sDir[i];
+      const dx = Math.cos(th) + (sx0 - Math.cos(th)) * e2, dy = sy0 * e2, dz = Math.sin(th) + (sz0 - Math.sin(th)) * e2;
+      // a órbita é vista quase de cima (um anel aberto, os nomes não se amontoam) e maior; ao virar esfera,
+      // ela se inclina até o ângulo final e encolhe para o raio da esfera
+      const tl = 1.05 + (tx - 1.05) * e2, ctl = Math.cos(tl), stl = Math.sin(tl), rr = sR * (1 + (wide() ? 0.18 : 0.04) * (1 - e2));
       let x = dx * ca + dz * sa, z = -dx * sa + dz * ca, y = dy;
-      const y2 = y * cx - z * sx, z2 = y * sx + z * cx;
-      const px = sFrom[i][0] + (x * sR - sFrom[i][0]) * e, py = sFrom[i][1] + (y2 * sR - sFrom[i][1]) * e, pz = z2 * sR * e;
-      const k = 1100 / (1100 - pz);
-      sEls[i].style.transform = `translate3d(${(px * k).toFixed(1)}px, ${(py * k).toFixed(1)}px, 0) translate(-50%, -50%) scale(${k.toFixed(3)})`;
-      sEls[i].style.opacity = (1 - e * (0.62 - 0.62 * (z2 + 1) / 2)).toFixed(3);
-      sPill[i].style.opacity = (1 - e).toFixed(3);
+      const y2 = y * ctl - z * stl, z2 = y * stl + z * ctl;
+      const pz = z2 * rr * e1, k = 1100 / (1100 - pz);
+      const px = (sFrom[i][0] + (x * rr - sFrom[i][0]) * e1) * k, py = (sFrom[i][1] + (y2 * rr - sFrom[i][1]) * e1) * k;
+      sEls[i].style.transform = `translate3d(${px.toFixed(1)}px, ${py.toFixed(1)}px, 0) translate(-50%, -50%) scale(${(1 + (k - 1) * e1).toFixed(3)})`;
+      sEls[i].style.opacity = (1 - e1 * (0.62 - 0.62 * (z2 + 1) / 2)).toFixed(3);
+      sPill[i].style.opacity = sNum[i].style.opacity = (1 - e1).toFixed(3);
+      sEls[i].classList.toggle("lit", e1 > 0.5);
     }
-    const o = ss(0.6, 1, sM).toFixed(3);
+    const o = ss(0.45, 0.9, sM).toFixed(3);
     sRim.style.opacity = o; sEq.style.opacity = o;
     sEq.style.transform = `translate(-50%, -50%) scaleY(.31) rotate(${(sAng * 57.3).toFixed(1)}deg)`;
   };
-  const sLoop = now => { sDraw(now); sRaf = requestAnimationFrame(sLoop); };
+  const sLoop = now => { sRaf = requestAnimationFrame(sLoop); sDraw(now); };
   const sphereTo = m => {
     if (m > 0 && !sFrom) sMeasure();
-    sM = m;
-    graph.classList.toggle("morph", m > 0);
+    sT = m;
     if (m > 0 && !sRaf) { sLast = 0; sRaf = requestAnimationFrame(sLoop); }
-    if (m <= 0 && sRaf) { cancelAnimationFrame(sRaf); sRaf = 0; sFrom = null; }
   };
-  let toolsAt = -2;
+  let toolsAt = -2, toolsST = null;
+  // escolher um trabalho com o mouse leva a rolagem para o ponto dele: rolar depois continua dali
+  function syncWork(attr, val) {
+    if (attr !== "w" || !toolsST || !toolsST.isActive) return;
+    const k = D.works.findIndex(w => w.id === val), n = D.works.length;
+    if (k < 0 || k === toolsAt) return;
+    toolsAt = k; jumpTo(toolsST.start + (toolsST.end - toolsST.start) * (0.04 + (k + 0.5) / n * 0.4));
+  }
   const toolsTo = p => {
     // primeiro a rolagem passa por cada trabalho, de cima para baixo; depois os nomes viram a esfera
-    const t = (p - 0.06) / 0.5, n = D.works.length;
-    const k = t < 0 || t >= 1 ? -1 : Math.floor(t * n);
+    const t = (p - 0.04) / 0.4, n = D.works.length;
+    const k = t < 0 || t >= 1 || !graph.classList.contains("ready") ? -1 : Math.floor(t * n);
     if (k !== toolsAt) { toolsAt = k; focusGraph("w", k < 0 ? null : D.works[k].id); }
-    sphereTo(ss(0.62, 0.86, p));
+    // a esfera se forma e fica parada no lugar; a última tela da seção é o contato subindo por cima dela
+    sphereTo(Math.min(1, Math.max(0, (p - 0.45) / 0.3)));
   };
 
   /* ---------- 08 · contato ---------- */
@@ -637,7 +685,8 @@
   // 08: o grafo fica grudado; a rolagem passeia pelos trabalhos e termina na esfera
   graphFit(); addEventListener("resize", () => { graphFit(); sFrom = null; if (sM > 0) sMeasure(); });
   document.fonts && document.fonts.ready.then(graphFit);
-  ScrollTrigger.create({ trigger: "#toolsRun", start: "top top", end: "bottom bottom", onUpdate: s => toolsTo(s.progress) });
+  // preso de verdade (fixed) por 3,8 telas: as últimas 0,26 são o contato subindo por cima da esfera parada
+  toolsST = ScrollTrigger.create({ trigger: ".tools-pin", start: "top top", end: "+=380%", pin: true, pinSpacing: true, anticipatePin: 1, onUpdate: s => toolsTo(s.progress) });
 
   const mm = gsap.matchMedia();
   mm.add({ wide: "(min-width: 861px)", narrow: "(max-width: 860px)" }, ctx => {

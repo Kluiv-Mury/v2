@@ -12512,13 +12512,15 @@ function App() {
     const wheel = e => {
       if (e.ctrlKey) return;
       e.preventDefault();
-      parent.dispatchEvent(new parent.WheelEvent("wheel", {
+      // com Lenis (Chrome) o evento é repassado e ele cuida da suavidade; sem Lenis (Safari) a rolagem
+      // sobre um iframe não passa sozinha para a página, então ela é rolada daqui, no mesmo tanto
+      if (parent.__lenis) parent.dispatchEvent(new parent.WheelEvent("wheel", {
         deltaX: e.deltaX,
         deltaY: e.deltaY,
         deltaMode: e.deltaMode,
         bubbles: true,
         cancelable: true
-      }));
+      }));else parent.scrollBy(0, e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? parent.innerHeight : 1));
     };
     window.addEventListener("wheel", wheel, {
       passive: false
