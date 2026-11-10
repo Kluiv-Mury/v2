@@ -12,7 +12,7 @@
   if (hasGsap) gsap.registerPlugin(ScrollTrigger);
   // indicadores de estado: os Thinking Orbs (cópia local, sem dependências) dizem o que cada parte está
   // fazendo agora. Trocar de estado apaga o orb, troca e acende de novo, para não haver corte seco
-  const orbsLib = import("./orbs.js?v=202611101630").catch(() => null);
+  const orbsLib = import("./orbs.js?v=202611101710").catch(() => null);
   const orb = (svg, o) => {
     let cur = null, gen = 0;
     const set = (opts, hint) => {
@@ -337,7 +337,7 @@
       if (live.length >= 12) return setJams(live, "agora");
       return fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, `retrato · ${new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date(s.retrato))}`));
     }).catch(() => fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, "retrato")).catch(() => {}));
-    import("./scene.js?v=202611101630").then(m => {
+    import("./scene.js?v=202611101710").then(m => {
       trip = m.createTrip({ canvas: $("#tripGL"), stations: [...stations.values()], term, geo: window.KMGEO || { cams: [], gauges: [], routes: [] }, layers: lay, mapSrc: "mapa-niteroi.svg", tagEls: tripTags, onFocus: userLayer });
       trip.setBikes(); if (wazePts) trip.setWaze(wazePts); if (jams) paintJams();
       tripTo(tripP);
@@ -386,7 +386,7 @@
   const loadLab = () => {
     if (labOn) return; labOn = true;
     const f = document.createElement("iframe");
-    f.src = "lab.html?v=202611101630"; f.title = "Gêmeo simplificado e pipeline do NitBike";
+    f.src = "lab.html?v=202611101710"; f.title = "Gêmeo simplificado e pipeline do NitBike";
     labOrb.set({ state: "working", size: 20 }); $("span", labWait).textContent = "carregando o laboratório…";
     f.addEventListener("load", () => { labWait.classList.add("gone"); setTimeout(() => labWait.remove(), 400); }, { once: true });
     labFrame.insertBefore(f, labWait);

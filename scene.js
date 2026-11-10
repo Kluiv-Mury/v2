@@ -113,6 +113,31 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
   dots.frustumCulled = false; dots.renderOrder = 100;   // por cima das lâminas
   scene.add(dots);
 
+  /* ---------- o banco: a moldura de cada snapshot e a janela de 5 min ---------- */
+  // as 36 fotografias da rede viram fichas empilhadas: cada uma com sua moldura fina; as 30 da janela
+  // ficam dentro de uma caixa laranja; as já apagadas e as últimas 30 s ficam de fora
+  const BX = 6 * 0.36 + 0.2, BT = 2 * 0.36 + 0.2 + 0.2, BB = -2 * 0.36 + 0.2 - 0.2, zOf = k => (k - 17.5) * 0.25;
+  const fp = [], fc = [], cOld = new THREE.Color(0x5b564e), cWin = new THREE.Color(0xff7a3d), cNew = new THREE.Color(CREAM);
+  for (let k = 0; k < S; k++) {
+    const z = zOf(k), c = k <= 2 ? cOld : k >= 33 ? cNew : cWin, a = k <= 2 || k >= 33 ? 0.9 : 0.16;
+    const P = [[-BX, BB], [BX, BB], [BX, BT], [-BX, BT]];
+    for (let j = 0; j < 4; j++) { const [x0, y0] = P[j], [x1, y1] = P[(j + 1) % 4]; fp.push(x0, y0, z, x1, y1, z); for (let m = 0; m < 2; m++) fc.push(c.r * a, c.g * a, c.b * a); }
+  }
+  const fGeo = new THREE.BufferGeometry(); fGeo.setAttribute("position", new THREE.Float32BufferAttribute(fp, 3)); fGeo.setAttribute("color", new THREE.Float32BufferAttribute(fc, 3));
+  const fMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending });
+  const frames = new THREE.LineSegments(fGeo, fMat); frames.renderOrder = 90; frames.frustumCulled = false; scene.add(frames);
+  // a caixa da janela: as doze arestas do snapshot 3 ao 32, um pouco maior que as fichas
+  const W0 = zOf(2.5), W1 = zOf(32.5), bx = BX + 0.08, bt = BT + 0.08, bb = BB - 0.08;
+  const cb = [[-bx, bb], [bx, bb], [bx, bt], [-bx, bt]], wp = [];
+  for (let j = 0; j < 4; j++) { const [x0, y0] = cb[j], [x1, y1] = cb[(j + 1) % 4]; wp.push(x0, y0, W0, x1, y1, W0, x0, y0, W1, x1, y1, W1, x0, y0, W0, x0, y0, W1); }
+  const wGeo = new THREE.BufferGeometry(); wGeo.setAttribute("position", new THREE.Float32BufferAttribute(wp, 3));
+  const wMat = new THREE.LineBasicMaterial({ color: ORANGE, transparent: true, opacity: 0, depthWrite: false, depthTest: false });
+  const winBox = new THREE.LineSegments(wGeo, wMat); winBox.renderOrder = 91; winBox.frustumCulled = false; scene.add(winBox);
+  // o vidro da janela: um volume laranja bem leve, só para dar corpo à caixa
+  const gGeo = new THREE.BoxGeometry(bx * 2, bt - bb, W1 - W0); gGeo.translate(0, (bt + bb) / 2, (W0 + W1) / 2);
+  const gMat = new THREE.MeshBasicMaterial({ color: ORANGE, transparent: true, opacity: 0, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending, side: THREE.BackSide });
+  const winGlass = new THREE.Mesh(gGeo, gMat); winGlass.renderOrder = 89; scene.add(winGlass);
+
   /* ---------- o mapa e a grade ---------- */
   const mapMat = new THREE.MeshBasicMaterial({ color: CREAM, transparent: true, opacity: 0, depthWrite: false });
   const mapGeo = new THREE.PlaneGeometry(20, 12.25); mapGeo.rotateX(-Math.PI / 2);
@@ -191,7 +216,9 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
   const mapMats = [], mapPlates = [];
   let wazeMat = null, wazePts = null;
   const fades = [];   // [material, opacidade cheia, é uniform?, camada]
-  const groups = [], plates = [];
+  const groups = [], plates = [], auras = [], edges = [];
+  // a cor de cada camada no destaque: prédios, chuva, câmeras, ônibus, trânsito, NitBike
+  const ACC = [0xd8c7a6, 0x6fb4ff, 0xf0c98e, 0x5fd8c6, 0xff6a2a, 0xe6ff57];
   const plateGeo = new THREE.PlaneGeometry(crop.s, crop.s); plateGeo.rotateX(-Math.PI / 2);
   const edge = new THREE.BufferGeometry();
   edge.setAttribute("position", new THREE.Float32BufferAttribute([crop.x0, 0, crop.z0, crop.x1, 0, crop.z0, crop.x1, 0, crop.z1, crop.x0, 0, crop.z1], 3));
@@ -205,7 +232,7 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
     for (let k = 0; k < uv.count; k++) uv.setXY(k, u0 + uv.getX(k) * (u1 - u0), v0 + uv.getY(k) * (v1 - v0)); }
   const inCropW = (x, z) => x > crop.x0 + 0.05 && x < crop.x1 - 0.05 && z > crop.z0 + 0.05 && z < crop.z1 - 0.05;
   const uTime = uni.uTime;
-  let jamGroup = null, jamMat = [], bld = null, busTick = null;
+  let jamGroup = null, jamMat = [], bld = null, busTick = null, camTick = null;
 
   layers.forEach((l, i) => {
     const gr = new THREE.Group();
@@ -219,6 +246,22 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
     const side = new THREE.LineSegments(slab, em); side.renderOrder = i * 3 + 2;
     fades.push([pm, 0.86, false, i], [mm, l.mine ? 0.2 : 0.14, false, i], [em, l.mine ? 1 : 0.55, false, i]);
     gr.add(plate, mapPlate, loop, side); plates.push(plate);
+    // o destaque: um halo na cor da camada em volta da lâmina, a borda acesa e uma faixa de luz que a atravessa
+    const ac = new THREE.Color(ACC[i] ?? CREAM);
+    const am = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      uniforms: { uC: { value: ac }, uO: { value: 0 }, uTime, uH: { value: crop.s / 2 } },
+      vertexShader: `varying vec2 vP; void main() { vP = position.xz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
+      fragmentShader: `uniform vec3 uC; uniform float uO, uTime, uH; varying vec2 vP;
+        void main() {
+          vec2 q = abs(vP) - uH; float out_ = length(max(q, 0.)), in_ = min(max(q.x, q.y), 0.);
+          float halo = exp(-out_ * 16.) * step(0., max(q.x, q.y)) * .3;
+          float rim = exp(-abs(max(q.x, q.y)) * 110.) * .85 + exp(in_ * 14.) * .04 * step(max(q.x, q.y), 0.);
+          float t = fract(uTime * .11), bx = (vP.x + vP.y) / (4. * uH) + .5 - t * 1.4 + .2, band = exp(-bx * bx * 3000.) * step(max(q.x, q.y), 0.) * .2;
+          gl_FragColor = vec4(pow(uC, vec3(1. / 2.2)), (halo + rim + band) * uO);
+        }` });
+    const ag = new THREE.PlaneGeometry(crop.s * 1.5, crop.s * 1.5); ag.rotateX(-Math.PI / 2);
+    const aura = new THREE.Mesh(ag, am); aura.position.set(crop.cx, 0.003, crop.cz); aura.renderOrder = i * 3 + 1; aura.frustumCulled = false;
+    gr.add(aura); auras.push(am); edges.push([em, em.color.clone(), ac]);
     // instâncias e tubos ficam fora da tela do ponto de vista do three (a esfera de corte é a da peça na origem)
     const add = (o, mat, full, u) => { o.renderOrder = i * 3 + 2; o.frustumCulled = false; gr.add(o); fades.push([mat, full, u, i]); return o; };
 
@@ -238,42 +281,91 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
         add(im, bm, 1); bld = im; warm();
       }).catch(() => {});
     } else if (i === 1) {
-      // pluviômetros: um cilindro de vidro azul em cada posição pública; a altura e as gotas são ilustrativas
-      const pts = geo.gauges.map(([x, y]) => [wx(x), wz(y)]).filter(([x, z]) => inCropW(x, z));
-      const cm = new THREE.MeshBasicMaterial({ color: BLUE, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
-      const cyl = new THREE.CylinderGeometry(0.045, 0.045, 1, 20, 1, true); cyl.translate(0, 0.5, 0);
-      const im = new THREE.InstancedMesh(cyl, cm, Math.max(1, pts.length)), m4 = new THREE.Matrix4();
+      // pluviômetros nas posições públicas: um tubo de vidro com água dentro e ondas no chão em volta.
+      // A chuva cai sobre a lâmina inteira. Nível da água, gotas e ondas são ilustrativos
+      const pts = geo.gauges.map(([x, y]) => [wx(x), wz(y)]).filter(([x, z]) => inCropW(x, z)), n = Math.max(1, pts.length);
       let sd = 5; const r2 = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
-      const hs = pts.map(() => 0.12 + r2() * 0.22);
-      pts.forEach(([x, z], k) => { m4.makeScale(1, hs[k], 1); m4.setPosition(x, 0.004, z); im.setMatrixAt(k, m4); });
-      add(im, cm, 0.42);
-      const rm = new THREE.MeshBasicMaterial({ color: BLUE, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
-      const ring = new THREE.RingGeometry(0.05, 0.062, 28); ring.rotateX(-Math.PI / 2);
-      const ri = new THREE.InstancedMesh(ring, rm, Math.max(1, pts.length));
-      pts.forEach(([x, z], k) => { m4.makeTranslation(x, 0.008, z); ri.setMatrixAt(k, m4); });
-      add(ri, rm, 0.9);
-      // gotas: caem dentro de cada cilindro, no relógio do shader
-      const D = 14, dp = new Float32Array(pts.length * D * 3), dr = new Float32Array(pts.length * D);
-      pts.forEach(([x, z], k) => { for (let j = 0; j < D; j++) { const a = r2() * 6.283, rr = r2() * 0.032, o = (k * D + j); dp[o * 3] = x + Math.cos(a) * rr; dp[o * 3 + 1] = hs[k]; dp[o * 3 + 2] = z + Math.sin(a) * rr; dr[o] = r2(); } });
-      const dg = new THREE.BufferGeometry(); dg.setAttribute("position", new THREE.BufferAttribute(dp, 3)); dg.setAttribute("aR", new THREE.BufferAttribute(dr, 1));
-      const dm = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-        uniforms: { uTime, uO: { value: 0 }, uPx: uni.uPx },
-        vertexShader: `uniform float uTime, uPx; attribute float aR; varying float vF;
-          void main() { float f = fract(aR + uTime * (.35 + aR * .3)); vF = f; vec3 p = position; p.y *= 1. - f;
-            vec4 mv = modelViewMatrix * vec4(p, 1.); gl_Position = projectionMatrix * mv; gl_PointSize = max(1.5, .7 * uPx / -mv.z); }`,
-        fragmentShader: `uniform float uO; varying float vF; void main() { float d = length(gl_PointCoord - .5); if (d > .5) discard;
-          gl_FragColor = vec4(.6, .8, 1., (1. - d * 2.) * uO * sin(vF * 3.14159)); }` });
-      const drops = new THREE.Points(dg, dm); drops.frustumCulled = false;
-      add(drops, dm, 0.9, true);
+      const hs = pts.map(() => 0.16 + r2() * 0.18), lv = pts.map(() => 0.3 + r2() * 0.5);
+      const m4 = new THREE.Matrix4();
+      const cm = new THREE.MeshBasicMaterial({ color: 0x9cc9ff, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+      const cyl = new THREE.CylinderGeometry(0.032, 0.032, 1, 24, 1, true); cyl.translate(0, 0.5, 0);
+      const tube = new THREE.InstancedMesh(cyl, cm, n);
+      pts.forEach(([x, z], k) => { m4.makeScale(1, hs[k], 1); m4.setPosition(x, 0.004, z); tube.setMatrixAt(k, m4); });
+      add(tube, cm, 0.22);
+      const wm = new THREE.MeshLambertMaterial({ color: 0x3f8fec, emissive: 0x1c4f9a, transparent: true, opacity: 0 });
+      const wcy = new THREE.CylinderGeometry(0.027, 0.027, 1, 24, 1, false); wcy.translate(0, 0.5, 0);
+      const water = new THREE.InstancedMesh(wcy, wm, n);
+      pts.forEach(([x, z], k) => { m4.makeScale(1, hs[k] * lv[k], 1); m4.setPosition(x, 0.005, z); water.setMatrixAt(k, m4); });
+      add(water, wm, 0.85);
+      // ondas: três anéis por pluviômetro, cada um num ponto do ciclo, abrindo e apagando no chão
+      const rp = new THREE.PlaneGeometry(0.34, 0.34); rp.rotateX(-Math.PI / 2);
+      const rip = new THREE.InstancedMesh(rp, null, n * 3), ph = new Float32Array(n * 3);
+      pts.forEach(([x, z], k) => { for (let j = 0; j < 3; j++) { m4.makeTranslation(x, 0.006, z); rip.setMatrixAt(k * 3 + j, m4); ph[k * 3 + j] = j / 3 + r2() * 0.1; } });
+      rp.setAttribute("aPh", new THREE.InstancedBufferAttribute(ph, 1));
+      const ripM = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        uniforms: { uTime, uO: { value: 0 } },
+        vertexShader: `attribute float aPh; varying vec2 vU; varying float vP; uniform float uTime;
+          void main() { vU = uv; vP = fract(aPh + uTime * .32); gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.); }`,
+        fragmentShader: `uniform float uO; varying vec2 vU; varying float vP;
+          void main() { float r = length(vU - .5) * 2., w = .035 + vP * .03, x = (r - .12 - vP * .85) / w; float a = exp(-x * x) * (1. - vP) * (1. - vP);
+            if (a < .01) discard; gl_FragColor = vec4(.55, .78, 1., a * uO); }` });
+      rip.material = ripM; add(rip, ripM, 0.9, true);
+      // a chuva: traços finos caindo sobre o recorte inteiro, mais densos perto dos pluviômetros
+      const RN = 900, rpz = new Float32Array(RN * 6), rr = new Float32Array(RN * 2), re = new Float32Array(RN * 2);
+      for (let k = 0; k < RN; k++) {
+        let x, z;
+        if (pts.length && r2() < 0.35) { const [gx, gz] = pts[k % pts.length], a = r2() * 6.283, d = Math.sqrt(r2()) * 0.4; x = gx + Math.cos(a) * d; z = gz + Math.sin(a) * d; }
+        else { x = crop.x0 + 0.06 + r2() * (crop.s - 0.12); z = crop.z0 + 0.06 + r2() * (crop.s - 0.12); }
+        x = Math.min(crop.x1 - 0.04, Math.max(crop.x0 + 0.04, x)); z = Math.min(crop.z1 - 0.04, Math.max(crop.z0 + 0.04, z));
+        const v = r2();
+        rpz.set([x, 0, z, x + 0.012, 0, z + 0.004], k * 6); rr[k * 2] = rr[k * 2 + 1] = v; re[k * 2] = 0; re[k * 2 + 1] = 1;
+      }
+      const rg = new THREE.BufferGeometry(); rg.setAttribute("position", new THREE.BufferAttribute(rpz, 3)); rg.setAttribute("aR", new THREE.BufferAttribute(rr, 1)); rg.setAttribute("aE", new THREE.BufferAttribute(re, 1));
+      const rainM = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        uniforms: { uTime, uO: { value: 0 } },
+        vertexShader: `uniform float uTime; attribute float aR, aE; varying float vA;
+          void main() { float f = fract(aR * 7.31 + uTime * (.75 + aR * .45)); vec3 p = position;
+            p.y = (1. - f) * .6 + aE * .05; p.x -= aE * .012 + (1. - f) * .02; vA = smoothstep(0., .08, f) * smoothstep(1., .85, f) * mix(.9, .25, aE);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.); }`,
+        fragmentShader: `uniform float uO; varying float vA; void main() { gl_FragColor = vec4(.62, .8, 1., vA * uO); }` });
+      const rain = new THREE.LineSegments(rg, rainM); add(rain, rainM, 0.55, true);
     } else if (i === 2) {
-      // câmeras: um ponto e o cone do que ela enxerga, cada uma virada para um lado
-      const pts = geo.cams.map(([x, y]) => [wx(x), wz(y)]).filter(([x, z]) => inCropW(x, z));
-      const km = new THREE.MeshBasicMaterial({ color: CREAM, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
-      const cone = new THREE.ConeGeometry(0.05, 0.16, 4, 1, true); cone.translate(0, -0.08, 0); cone.rotateZ(Math.PI / 2);
-      const im = new THREE.InstancedMesh(cone, km, Math.max(1, pts.length)), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), ps = new THREE.Vector3();
-      pts.forEach(([x, z], k) => { q.setFromAxisAngle(up, (k * 2.399) % 6.283); ps.set(x, 0.05, z); m4.compose(ps, q, one); im.setMatrixAt(k, m4); });
-      add(im, km, 0.22);
-      const m = markMat(CREAM, 1.6, 2); add(new THREE.Points(ptsOf(geo.cams).translate(0, 0.03, 0), m), m, 0.95, true);
+      // câmeras nas posições públicas: um poste, a cabeça e, no chão, o leque do que ela enxerga,
+      // varrendo devagar para um lado e para o outro (o ângulo e o giro são ilustrativos)
+      const pts = geo.cams.map(([x, y]) => [wx(x), wz(y)]).filter(([x, z]) => inCropW(x, z)), n = Math.max(1, pts.length);
+      const POLE = 0.085;
+      const pole = new THREE.BufferGeometry(); pole.setAttribute("position", new THREE.Float32BufferAttribute(pts.flatMap(([x, z]) => [x, 0.004, z, x, POLE, z]), 3));
+      const plm = new THREE.LineBasicMaterial({ color: CREAM, transparent: true, opacity: 0, depthWrite: false });
+      add(new THREE.LineSegments(pole, plm), plm, 0.5);
+      const head = new THREE.BufferGeometry(); head.setAttribute("position", new THREE.Float32BufferAttribute(pts.flatMap(([x, z]) => [x, POLE, z]), 3));
+      const hm = markMat(0xfff3e0, 1.25, 2); add(new THREE.Points(head, hm), hm, 1, true);
+      // a luz de gravação: um ponto laranja que pisca devagar, cada câmera no seu tempo
+      const rec = new THREE.BufferGeometry(); rec.setAttribute("position", new THREE.Float32BufferAttribute(pts.flatMap(([x, z]) => [x, POLE + 0.03, z]), 3));
+      rec.setAttribute("aR", new THREE.Float32BufferAttribute(pts.map((_, k) => (k * 0.618) % 1), 1));
+      const recM = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        uniforms: { uTime, uO: { value: 0 }, uPx: uni.uPx },
+        vertexShader: `uniform float uTime, uPx; attribute float aR; varying float vB;
+          void main() { vB = pow(.5 + .5 * sin((uTime * .9 + aR) * 6.283), 3.); vec4 mv = modelViewMatrix * vec4(position, 1.); gl_Position = projectionMatrix * mv; gl_PointSize = max(2., .9 * uPx / -mv.z); }`,
+        fragmentShader: `uniform float uO; varying float vB; void main() { float d = length(gl_PointCoord - .5); if (d > .5) discard;
+          gl_FragColor = vec4(1., .42, .2, smoothstep(.5, .1, d) * vB * uO); }` });
+      add(new THREE.Points(rec, recM), recM, 1, true);
+      // o leque: um setor de 52° no chão, aceso perto da câmera e sumindo no alcance, com as bordas marcadas
+      const R = 0.44, fan = new THREE.CircleGeometry(R, 24, -0.45, 0.9); fan.rotateX(-Math.PI / 2);
+      const fanM = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        uniforms: { uTime, uO: { value: 0 } },
+        vertexShader: `varying vec2 vP; void main() { vP = position.xz; gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.); }`,
+        fragmentShader: `uniform float uO, uTime; varying vec2 vP;
+          void main() { float r = length(vP) / ${R.toFixed(2)}, a = abs(atan(vP.y, vP.x)) / .45;
+            float body = (1. - r) * (1. - r) * .42 + .05, rim = smoothstep(.06, 0., abs(a - 1.)) * (1. - r) * .9;
+            float sx = (r - fract(uTime * .45)) / .05, scan = exp(-sx * sx) * (1. - r) * .5;
+            gl_FragColor = vec4(1., .88, .7, (body + rim + scan) * smoothstep(1., .9, r) * uO); }` });
+      const fans = new THREE.InstancedMesh(fan, fanM, n); add(fans, fanM, 0.75, true);
+      const base = pts.map((_, k) => (k * 2.399) % 6.283), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), upv = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), ps = new THREE.Vector3();
+      camTick = time => {
+        pts.forEach(([x, z], k) => { q.setFromAxisAngle(upv, base[k] + Math.sin(time * 0.32 + k * 1.7) * 0.6); ps.set(x, 0.006, z); m4.compose(ps, q, one); fans.setMatrixAt(k, m4); });
+        fans.instanceMatrix.needsUpdate = true;
+      };
+      camTick(0);
     } else if (i === 3) {
       // ônibus: o traçado real das rotas, fino, e alguns ônibus 3D (ilustrativos) indo e voltando por ele
       const lm = new THREE.LineBasicMaterial({ color: TEAL, transparent: true, opacity: 0, depthWrite: false });
@@ -336,11 +428,6 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
     });
     return n;
   }
-  // o fio que liga o Terminal de uma camada à outra
-  const wireGeo = new THREE.BufferGeometry(); wireGeo.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 1, 0], 3));
-  const wireMat = new THREE.LineBasicMaterial({ color: LIME, transparent: true, opacity: 0, depthWrite: false, depthTest: false });
-  const wire = new THREE.Line(wireGeo, wireMat); wire.position.set(wx(term.x), 0, wz(term.y)); wire.renderOrder = 40; stack.add(wire);
-
   /* ---------- câmera ---------- */
   const KEYS = [
     { p: [0, 2.4, 13.5], t: [0, 0, 0] },
@@ -369,7 +456,7 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
   let state = 0, explode = 0, mx = 0, my = 0, sx = 0, sy = 0, raf = 0, t0 = performance.now();
   // destaque de uma camada: as outras apagam e a escolhida sobe um pouco
   let focus = -1, hover = -1;
-  const hl = layers.map(() => 1), up = layers.map(() => 0);
+  const hl = layers.map(() => 1), up = layers.map(() => 0), fk = layers.map(() => 0);
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
   const pick = (cx, cy) => {
     if (explode < 0.85) return -1;
@@ -420,6 +507,10 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
     vp.y += sy * -0.5;
     camera.position.copy(vp); camera.lookAt(vt);
 
+    // o banco aparece só em volta da etapa 03
+    const wB = ss(0.55, 1, 1 - Math.abs(state - 2));
+    fMat.opacity = 0.55 * wB; wMat.opacity = wB; gMat.opacity = 0.05 * wB;
+    frames.visible = winBox.visible = winGlass.visible = wB > 0.002;
     const mapO = ss(3.1, 4, state);
     mapMat.opacity = 0.34 * mapO * (1 - Math.max(e, rise * 0.75));
     gridMat.opacity = 0.13 * ss(2.4, 3, state) * (1 - ss(3.5, 4.2, state));
@@ -431,6 +522,10 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
       groups.forEach((gr, k) => {
         hl[k] += ((focus < 0 ? 1 : k === focus ? 1 : 0.16) - hl[k]) * 0.12;
         up[k] += ((k === focus ? 0.24 : 0) - up[k]) * 0.12;
+        fk[k] += ((k === focus ? 1 : 0) - fk[k]) * 0.1;
+        auras[k].uniforms.uO.value = fk[k] * o;
+        const [em, c0, ac] = edges[k];
+        em.color.copy(c0).lerp(ac, fk[k]);
         gr.position.y = k * GAP * e + up[k] * e;
       });
       fades.forEach(([m, full, u, k]) => {
@@ -439,7 +534,7 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
       });
       uni.uDim.value = hl[LN - 1];
       if (busTick && o > 0.01) busTick(time);
-      wire.scale.y = Math.max(0.001, (LN - 1) * GAP * e); wireMat.opacity = 0.9 * ss(0.4, 1, e);
+      if (camTick && o > 0.01) camTick(time);
     }
     renderer.render(scene, camera);
 
