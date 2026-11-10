@@ -317,7 +317,7 @@
       if (live.length >= 12) return setJams(live, "agora");
       return fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, `retrato · ${new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date(s.retrato))}`));
     }).catch(() => fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, "retrato")).catch(() => {}));
-    import("./scene.js?v=202611101147").then(m => {
+    import("./scene.js?v=202611101420").then(m => {
       trip = m.createTrip({ canvas: $("#tripGL"), stations: [...stations.values()], term, geo: window.KMGEO || { cams: [], gauges: [], routes: [] }, layers: lay, mapSrc: "mapa-niteroi.svg", tagEls: tripTags, onFocus: userLayer });
       trip.setBikes(); if (wazePts) trip.setWaze(wazePts); if (jams) paintJams();
       tripTo(tripP);
@@ -364,7 +364,7 @@
   const loadLab = () => {
     if (labOn) return; labOn = true;
     const f = document.createElement("iframe");
-    f.src = "lab.html?v=202611101147"; f.title = "Gêmeo simplificado e pipeline do NitBike";
+    f.src = "lab.html?v=202611101420"; f.title = "Gêmeo simplificado e pipeline do NitBike";
     labFrame.innerHTML = ""; labFrame.appendChild(f);
   };
   addEventListener("load", () => setTimeout(() => idle(loadLab, { timeout: 4000 }), 3200));
@@ -469,6 +469,45 @@
       <div class="pj-demo">${demos[p.id]}</div>
     </div></article>`).join("");
   const pjs = $$(".pj");
+  // mapa do Brasil: cada estado é um bloco que nasce rente ao chão e sobe até a altura dele conforme o
+  // projeto entra na tela, numa onda de norte a sul. A rolagem dá o alvo e os blocos chegam nele devagar
+  // (amortecido), então descer rápido ou devagar dá sempre uma subida macia; voltar desce de novo
+  {
+    const plane = $(".uf-plane"), pj = plane && plane.closest(".pj");
+    if (plane) {
+      const tiles = $$(".t", plane).map(t => ({ t, top: t.querySelector(".tt"), s: t.querySelector(".ts"), e: t.querySelector(".te"), h: parseFloat(t.style.getPropertyValue("--h")), d: parseFloat(t.style.getPropertyValue("--d")) }));
+      const dMax = Math.max(...tiles.map(x => x.d));
+      const cl0 = v => Math.min(1, Math.max(0, v)), ez = t => 1 - Math.pow(1 - t, 3);
+      let cur = reduce ? 1 : 0, goal = cur, raf = 0, lastT = 0;
+      const paint = () => tiles.forEach(x => {
+        const k = ez(cl0(cur * 1.55 - (x.d / dMax) * 0.55));
+        const h = Math.max(0.02, x.h * k);
+        x.top.style.transform = `translateZ(${h.toFixed(3)}em)`;
+        x.s.style.transform = `rotateX(90deg) scaleY(${(h / x.h).toFixed(3)})`;
+        x.e.style.transform = `rotateY(90deg) scaleX(${(h / x.h).toFixed(3)})`;
+        // o contorno do Brasil já aparece apagado, rente ao chão; cada bloco acende enquanto sobe
+        x.t.style.opacity = (0.28 + 0.72 * cl0(k * 3)).toFixed(3);
+      });
+      const tick = now => {
+        const dt = lastT ? Math.min(0.05, (now - lastT) / 1000) : 0.016; lastT = now;
+        cur += (goal - cur) * (1 - Math.exp(-dt * 2.6));
+        if (Math.abs(goal - cur) < 0.001) cur = goal;
+        paint();
+        raf = cur === goal ? 0 : requestAnimationFrame(tick);
+      };
+      const want = () => {
+        const r = plane.getBoundingClientRect(), vh = innerHeight;
+        // 0 quando o mapa aponta embaixo da tela; 1 quando o centro dele passa de 60% da altura
+        goal = reduce ? 1 : cl0((vh - (r.top + r.height * 0.5)) / (vh * 0.55));
+        if (!raf) { lastT = 0; raf = requestAnimationFrame(tick); }
+      };
+      plane.classList.add("js");
+      paint();
+      let on = false;
+      new IntersectionObserver(([e]) => { on = e.isIntersecting; if (on) want(); }, { rootMargin: "20% 0px" }).observe(pj);
+      addEventListener("scroll", () => { if (on) want(); }, { passive: true });
+    }
+  }
   // cada projeto monta a demonstração uma vez; fora da tela, o que flutua pausa
   const pjOnce = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { pjOnce.unobserve(e.target); e.target.classList.add("on"); } }), { threshold: 0.3 });
   const pjLive = new IntersectionObserver(es => es.forEach(e => e.target.classList.toggle("live", e.isIntersecting)));
@@ -507,7 +546,9 @@
     gsvg.setAttribute("viewBox", `0 0 ${box.width} ${box.height}`);
     const yOf = el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2 - box.top; };
     let k = 0;
-    gsvg.innerHTML = D.works.flatMap(w => w.tech.map(t => {
+    // gradiente radial que pinta as linhas durante o globo: creme no núcleo, laranja em volta e transparente
+    // longe dele (os raios e as paradas são ajustados a cada quadro em pullLines)
+    gsvg.innerHTML = `<defs><radialGradient id="gCore" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1000"><stop offset="0" stop-color="#fff6ea"/><stop offset=".04" stop-color="#ffd2a2"/><stop offset=".1" stop-color="#ff8a4a"/><stop offset=".6" stop-color="#ff5a1f" stop-opacity=".78"/><stop offset="1" stop-color="#ff5a1f" stop-opacity="0"/></radialGradient></defs>` + D.works.flatMap(w => w.tech.map(t => {
       const y1 = yOf($(`button[data-w="${w.id}"]`, graph)), y2 = yOf($(`button[data-t="${CSS.escape(t)}"]`, graph)), x2 = box.width;
       return `<path class="link" pathLength="1" style="--k:${k++}" data-w="${w.id}" data-t="${t}" data-g="${y1.toFixed(1)},${y2.toFixed(1)},${x2.toFixed(1)}" d="M0 ${y1.toFixed(1)} C ${(x2 * 0.5).toFixed(1)} ${y1.toFixed(1)}, ${(x2 * 0.5).toFixed(1)} ${y2.toFixed(1)}, ${x2} ${y2.toFixed(1)}"/>`;
     })).join("");
@@ -571,7 +612,7 @@
     drawGraph();
     if (!graph.classList.contains("in")) {
       // os nós entram, depois as linhas se desenham; o "ready" tira os atrasos da entrada
-      requestAnimationFrame(() => graph.classList.add("in"));
+      setTimeout(() => graph.classList.add("in"), 30);   // timer, não quadro: aparece mesmo com a aba sem pintar
       setTimeout(() => graph.classList.add("ready"), 1500);
     }
     if (!touched && !reduce && !tour) tour = setInterval(() => focusGraph("w", D.works[tourI++ % D.works.length].id), 2600);
@@ -616,16 +657,123 @@
   const ease = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
   const cl = v => Math.min(1, Math.max(0, v));
   const lerp = (a, b, t) => a + (b - a) * t;
-  // as linhas não somem: cada uma encolhe até o centro, primeiro perdendo a curva (vira um fio esticado)
-  // e depois as duas pontas correm para o núcleo, onde a esfera vai nascer
-  const pullLines = m => {
-    const n = gLinks.length, [cx0, cy0] = sC;
-    gLinks.forEach(({ p, g: [y1, y2, x2] }, k) => {
-      const e = ease(cl((m - (k / n) * 0.08) / 0.3)), ec = Math.pow(e, 0.55);
-      const ax = lerp(0, cx0, e), ay = lerp(y1, cy0, e), dx = lerp(x2, cx0, e), dy = lerp(y2, cy0, e);
-      const bx = lerp(x2 * 0.5, cx0, ec), by = lerp(y1, cy0, ec), cx1 = lerp(x2 * 0.5, cx0, ec), cy1 = lerp(y2, cy0, ec);
-      p.setAttribute("d", `M${ax.toFixed(1)} ${ay.toFixed(1)} C ${bx.toFixed(1)} ${by.toFixed(1)}, ${cx1.toFixed(1)} ${cy1.toFixed(1)}, ${dx.toFixed(1)} ${dy.toFixed(1)}`);
-      p.style.opacity = (1 - ss(0.7, 1, e)).toFixed(3);
+  // as linhas caem no núcleo e viram filamentos orbitando dentro dele.
+  // Cada ligação vira 24 pontos tirados da curva original. O destino de cada linha foi desenhado antes: um
+  // arco suave numa elipse inclinada, com raio, inclinação e fase próprios (como as órbitas de um átomo).
+  // O caminho de um ponto até o destino é feito em coordenadas polares em volta do centro (raio e ângulo
+  // interpolados juntos, com meia volta a mais), o que dá uma espiral; os ângulos são "desenrolados" ao
+  // longo da linha, então pontos vizinhos andam sempre juntos e a linha nunca dobra em quina.
+  // Uma ponta sai um pouco antes da outra, e a linha entra no núcleo como um fio sendo puxado.
+  // O desenho final passa por uma spline (Catmull-Rom), então toda curva é contínua e sem ângulos.
+  const LP = 24, TAU = Math.PI * 2;
+  let lineKey = "", gCoreEl = null;
+  const unwrap = arr => { for (let i = 1; i < arr.length; i++) { while (arr[i] - arr[i - 1] > Math.PI) arr[i] -= TAU; while (arr[i] - arr[i - 1] < -Math.PI) arr[i] += TAU; } return arr; };
+  const lineSetup = () => {
+    const key = `${sC[0].toFixed(1)},${sC[1].toFixed(1)},${sR.toFixed(1)},${gLinks.length}`;
+    if (key === lineKey && gLinks[0] && gLinks[0].pr) return; lineKey = key;   // o grafo pode ter sido redesenhado
+    const [cx0, cy0] = sC, n = gLinks.length;
+    gLinks.forEach((L, k) => {
+      const [y1, y2, x2] = L.g;
+      const r0 = [], a0 = [];
+      for (let i = 0; i < LP; i++) {
+        const t = i / (LP - 1), u = 1 - t;
+        const x = 3 * u * t * t * x2 * 0.5 + 3 * u * u * t * x2 * 0.5 + t * t * t * x2;
+        const y = u * u * u * y1 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y2;
+        r0.push(Math.hypot(x - cx0, y - cy0)); a0.push(Math.atan2(y - cy0, x - cx0)); (L.ox || (L.ox = []))[i] = x; (L.oy || (L.oy = []))[i] = y;
+        // a mesma ligação "apertada": as pontas no lugar e as duas alças no centro do núcleo, então a curva
+        // passa por ele. Todas juntas formam uma ampulheta de fios que converge para o ponto de luz
+        const px = 3 * u * u * t * cx0 + 3 * u * t * t * cx0 + t * t * t * x2;
+        const py = u * u * u * y1 + 3 * u * u * t * cy0 + 3 * u * t * t * cy0 + t * t * t * y2;
+        (L.qx || (L.qx = []))[i] = px; (L.qy || (L.qy = []))[i] = py;
+      }
+      unwrap(a0);
+      // a órbita de destino desta linha (números fixos por linha, espalhados pela proporção áurea)
+      const h1 = (k * 0.618034) % 1, h2 = (k * 0.414214 + 0.3) % 1, h3 = (k * 0.732051 + 0.6) % 1;
+      // o arco de destino corre no mesmo sentido e com a mesma abertura da linha vista do centro: assim
+      // todos os pontos giram quase o mesmo tanto e a linha entra inteira, sem se torcer
+      const range = a0[LP - 1] - a0[0], arcDir = Math.sign(range) || 1;
+      // três planos de órbita a 60° um do outro (um giroscópio), em vez de inclinações soltas: lido de longe,
+      // o núcleo vira uma esfera de anéis e não um novelo
+      const plane = k % 3, rk = sR * (0.13 + 0.09 * h1), squash = 0.36 + 0.06 * h2, tilt = plane * Math.PI / 3 + (h3 - 0.5) * 0.14, ph = h1 * TAU;
+      const span = Math.min(Math.PI * 1.7, Math.max(Math.PI * 1.1, Math.abs(range)));
+      // todas giram para o mesmo lado: um redemoinho só, sem linhas se cruzando em sentidos opostos
+      const dir = 1, ct = Math.cos(tilt), st = Math.sin(tilt);
+      const rf = [], af = [];
+      for (let i = 0; i < LP; i++) {
+        const a = ph + arcDir * span * (i / (LP - 1)), ex = Math.cos(a) * rk, ey = Math.sin(a) * rk * squash;
+        const fx = ex * ct - ey * st, fy = ex * st + ey * ct;
+        rf.push(Math.hypot(fx, fy)); af.push(Math.atan2(fy, fx));
+      }
+      unwrap(af);
+      // escolhe a volta do destino mais perto da linha original e soma meia volta no sentido dela: espiral
+      // o destino fica na volta mais próxima do meio da linha, mais um quarto de volta no sentido dela (espiral)
+      const mid = LP >> 1, off = Math.round((a0[mid] - af[mid]) / TAU) * TAU + dir * Math.PI * 0.5;
+      for (let i = 0; i < LP; i++) af[i] += off;
+      L.pr = r0; L.pa = a0; L.fr = rf; L.fa = af; L.dir = dir; L.lead = k % 3 === 0 ? -1 : 1; L.k = k / n;
+      // para o giro: a órbita é guardada como elipse (e não só como pontos), e a luz corre por ela
+      // o arco final começa do mesmo lado em que a linha começa (visto do centro): cada ponto da linha tem
+      // um par no anel bem à frente dele, e a transformação não cruza o núcleo
+      const offR = off % TAU, ph2 = a0[0] - tilt - offR;
+      L.orb = { rk, squash, tilt, ph: ph2, arcDir, span, offR, plane };
+      L.spin = 0.55 + plane * 0.12;
+    });
+  };
+  const smooth = pts => {
+    let d = `M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
+      d += ` C${(p1[0] + (p2[0] - p0[0]) / 6).toFixed(1)} ${(p1[1] + (p2[1] - p0[1]) / 6).toFixed(1)} ${(p2[0] - (p3[0] - p1[0]) / 6).toFixed(1)} ${(p2[1] - (p3[1] - p1[1]) / 6).toFixed(1)} ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+    }
+    return d;
+  };
+  const sstep = t => t * t * t * (t * (t * 6 - 15) + 10);   // smootherstep: começa e termina sem tranco
+  const pullLines = (m, time) => {
+    // sem medida válida (grafo ainda sem tamanho, um quadro de redesenho), não desenha nada errado
+    if (!isFinite(sC[0]) || !isFinite(sC[1]) || !sR) return;
+    lineSetup();
+    const [cx0, cy0] = sC;
+    // a luz: o centro do gradiente acompanha o núcleo; conforme o globo se forma, a parte transparente
+    // fecha em volta dele e as pontas de fora das linhas se apagam sozinhas, sem cortes
+    const grad = gsvg.querySelector("#gCore"), R0 = Math.max(gsvg.viewBox.baseVal.width, 600), f = ss(0.2, 0.75, m);
+    if (grad) {
+      grad.setAttribute("cx", cx0.toFixed(1)); grad.setAttribute("cy", cy0.toFixed(1)); grad.setAttribute("r", R0.toFixed(0));
+      const st = grad.children, o = [sR * 0.07, sR * 0.16, lerp(0.6 * R0, sR * 0.8, f), lerp(R0, sR * 1.45, f)].map(v => cl(v / R0));
+      st[1].setAttribute("offset", o[0].toFixed(4)); st[2].setAttribute("offset", Math.max(o[0] + 0.001, o[1]).toFixed(4));
+      st[3].setAttribute("offset", Math.max(o[1] + 0.002, o[2]).toFixed(4)); st[4].setAttribute("offset", Math.max(o[2] + 0.003, o[3]).toFixed(4));
+    }
+    // cada linha se transforma direto no seu anel: os pontos da curva original e os do arco final são
+    // misturados (uma mistura de duas curvas suaves é sempre suave, então não há quina nem laço solto).
+    // O anel de destino chega girando um pouco para trás e se acomoda no lugar: o caminho de cada ponto
+    // vira uma curva, e o conjunto parece entrar em órbita. A entrada é por plano: primeiro os fios do
+    // primeiro anel, depois os do segundo, depois os do terceiro
+    gLinks.forEach(L => {
+      const n3 = Math.ceil(gLinks.length / 3), pts = [], o = L.orb, kin = Math.floor(Math.round(L.k * gLinks.length) / 3) / n3;
+      // primeiro tempo (0 a 0,22): as ligações se apertam no centro, ainda presas nos botões; só então soltam
+      // a soltura começa antes de o aperto terminar: um movimento emenda no outro, sem parada no meio
+      const pinch = sstep(cl(m / 0.24)), start = 0.07 + o.plane * 0.11 + kin * 0.05;
+      let wSum = 0;
+      for (let i = 0; i < LP; i++) {
+        const along = L.lead > 0 ? i / (LP - 1) : 1 - i / (LP - 1);
+        const w = sstep(cl((m - start - along * 0.04) / 0.4));
+        wSum += w;
+        const rot = o.tilt + o.offR + 0.95 * (1 - w), cr = Math.cos(rot), sr = Math.sin(rot);
+        const pa = o.ph + o.arcDir * o.span * (i / (LP - 1)) + time * L.spin;
+        const ex = Math.cos(pa) * o.rk, ey = Math.sin(pa) * o.rk * o.squash;
+        const tx = cx0 + ex * cr - ey * sr, ty = cy0 + ex * sr + ey * cr;
+        const sx = L.ox[i] + (L.qx[i] - L.ox[i]) * pinch, sy = L.oy[i] + (L.qy[i] - L.oy[i]) * pinch;
+        pts.push([sx + (tx - sx) * w, sy + (ty - sy) * w]);
+      }
+      const em = wSum / LP;
+      if (pts.some(q => !isFinite(q[0]) || !isFinite(q[1]))) return;
+      L.p.setAttribute("d", smooth(pts));
+      // rastro: enquanto cai, a linha perde o pedaço de trás (fica só a cabeça que entra primeiro); já no
+      // núcleo, o trecho aceso corre pela órbita, como energia circulando
+      const vis = 1 - 0.5 * em, flow = time * 0.07 * ss(0.7, 1, em) + L.k * 0.6;
+      const head = L.lead > 0 ? 0 : -(1 - vis);
+      L.p.style.strokeDasharray = `${vis.toFixed(4)} ${(1.0001 - vis + 0.0001).toFixed(4)}`;
+      L.p.style.strokeDashoffset = (head - flow * ss(0.7, 1, em)).toFixed(4);
+      L.p.style.strokeWidth = (1.3 - 0.45 * em).toFixed(2);
+      L.p.style.opacity = "1";
     });
   };
   const sDraw = now => {
@@ -638,19 +786,20 @@
     graph.classList.toggle("morph", sM > 0);
     if (sM <= 0 && sT <= 0) {
       cancelAnimationFrame(sRaf); sRaf = 0; sFrom = null;
-      if (was) { gLinks.forEach(({ p }) => { p.style.opacity = ""; }); drawGraph(); }
+      if (was) { gLinks.forEach(({ p }) => { p.style.opacity = p.style.stroke = p.style.strokeWidth = p.style.strokeDasharray = p.style.strokeDashoffset = ""; }); lineKey = ""; gCoreEl = null; drawGraph(); }
       return false;
     }
-    pullLines(sM);
+    pullLines(sM, now / 1000);
     // giro: devagar na esfera; na bola de luz cada rolada acelera, até virar um borrão
-    sAng += dt * (0.32 * ss(0.25, 0.6, sM) + 9 * sL * sL);
+    // giro: devagar na esfera; rolando mais, a órbita dos nomes acelera (a esfera não cresce nem some)
+    sAng += dt * (0.32 * ss(0.25, 0.6, sM) + 3.4 * Math.pow(sL, 1.4));
     const ca = Math.cos(sAng), sa = Math.sin(sAng), tx = 0.32;
-    const shrink = 1 - 0.9 * ease(sL), fade = 1 - ss(0.15, 0.75, sL);
+    const shrink = 1, fade = 1;
     // três tempos: os nomes entram numa órbita (o equador da esfera, já girando); a órbita se abre e vira
     // a esfera; e, rolando mais, a esfera gira cada vez mais rápido e se fecha numa bola de luz
     for (let i = 0; i < NS_; i++) {
       const d = i / NS_ * 0.06;
-      const e1 = ease(cl((sM - 0.18 - d) / 0.4));
+      const e1 = ease(cl((sM - 0.14 - d) / 0.42));   // os nomes saem enquanto o aperto se completa
       const e2 = ease(cl((sM - 0.6 - d) / 0.34));
       // na órbita a ordem também salta de 11 em 11, para os trabalhos (laranja) ficarem espalhados no anel
       const th = ((i * 11) % NS_) / NS_ * Math.PI * 2, [sx0, sy0, sz0] = sDir[i];
@@ -663,22 +812,23 @@
       const y2 = y * ctl - z * stl, z2 = y * stl + z * ctl;
       const pz = z2 * rr * e1, k = 1100 / (1100 - pz);
       const px = (sFrom[i][0] + (x * rr - sFrom[i][0]) * e1) * k, py = (sFrom[i][1] + (y2 * rr - sFrom[i][1]) * e1) * k;
-      const sc2 = (1 + (k - 1) * e1) * (1 - 0.55 * sL);
+      const sc2 = 1 + (k - 1) * e1;
       sEls[i].style.transform = `translate3d(${px.toFixed(1)}px, ${py.toFixed(1)}px, 0) translate(-50%, -50%) scale(${sc2.toFixed(3)})`;
       sEls[i].style.opacity = ((1 - e1 * (0.62 - 0.62 * (z2 + 1) / 2)) * fade).toFixed(3);
       sPill[i].style.opacity = sNum[i].style.opacity = (1 - e1).toFixed(3);
       sEls[i].classList.toggle("lit", e1 > 0.5);
     }
-    const o = ss(0.45, 0.9, sM) * (1 - ss(0, 0.5, sL));
+    const o = ss(0.45, 0.9, sM);
     sRim.style.opacity = o.toFixed(3); sEq.style.opacity = o.toFixed(3);
     sEq.style.transform = `translate(-50%, -50%) scaleY(.31) rotate(${(sAng * 57.3).toFixed(1)}deg)`;
     // o núcleo: um ponto que acende quando as linhas chegam, respira com a esfera e explode em luz no fim
-    const seed = ss(0.12, 0.32, sM) * (1 - ss(0.5, 0.9, sM) * 0.6);
-    const cs = 0.06 + 0.12 * seed + 0.1 * ss(0.6, 1, sM) + 0.62 * ease(sL);
-    sCore.style.opacity = Math.max(seed, ss(0.55, 1, sM) * 0.55, ss(0, 0.35, sL)).toFixed(3);
-    sCore.style.transform = `translate(-50%, -50%) scale(${cs.toFixed(3)})`;
-    sHalo.style.opacity = (ss(0.25, 1, sL) * (0.85 + 0.15 * Math.sin(now / 260))).toFixed(3);
-    sHalo.style.transform = `translate(-50%, -50%) scale(${(0.5 + 0.32 * ease(sL)).toFixed(3)})`;
+    // o núcleo acende conforme as linhas chegam e fica do tamanho do miolo; com a órbita acelerando ele só
+    // pulsa um pouco mais forte
+    // um ponto de luz acende no centro enquanto as ligações se apertam nele, e cresce quando os anéis chegam
+    const glow = Math.max(0.5 * ss(0.04, 0.22, sM), ss(0.3, 0.65, sM)), beat = 1 + Math.sin(now / 420) * (0.025 + 0.05 * sL);
+    sCore.style.opacity = (glow * (0.7 + 0.25 * sL)).toFixed(3);
+    sCore.style.transform = `translate(-50%, -50%) scale(${((0.05 + 0.33 * glow) * beat).toFixed(3)})`;
+    sHalo.style.opacity = "0";
   };
   const sLoop = now => { sRaf = requestAnimationFrame(sLoop); sDraw(now); };
   const sphereTo = (m, l) => {
@@ -701,7 +851,7 @@
     const k = t < 0 || t >= 1 || !graph.classList.contains("ready") ? -1 : Math.floor(t * n);
     if (k !== toolsAt) { toolsAt = k; focusGraph("w", k < 0 ? null : D.works[k].id); }
     // a esfera se forma e fica parada no lugar; a última tela da seção é o contato subindo por cima dela
-    sphereTo(Math.min(1, Math.max(0, (p - 0.34) / 0.24)), Math.min(1, Math.max(0, (p - 0.6) / 0.2)));
+    sphereTo(Math.min(1, Math.max(0, (p - 0.34) / 0.26)), Math.min(1, Math.max(0, (p - 0.62) / 0.18)));
   };
 
   /* ---------- 08 · contato ---------- */
