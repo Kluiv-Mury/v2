@@ -1,0 +1,549 @@
+/* Portfólio v5: a viagem de um dado. Rolagem com Lenis + ScrollTrigger num só relógio (o do GSAP).
+   Regra de desempenho: o que acompanha a rolagem só mexe em transform e opacity, e nada escreve em estado por quadro. */
+(() => {
+  const D = window.KM;
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const wide = () => innerWidth > 860;
+  const h = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
+  const fmt = n => n.toLocaleString("pt-BR");
+  const hasGsap = !!(window.gsap && window.ScrollTrigger);
+  if (hasGsap) gsap.registerPlugin(ScrollTrigger);
+
+  /* ---------- rolagem suave: Lenis no relógio do GSAP ---------- */
+  let lenis = null;
+  if (hasGsap && window.Lenis && !reduce) {
+    lenis = new Lenis({ lerp: 0.11, wheelMultiplier: 1, smoothWheel: true });
+    lenis.on("scroll", ScrollTrigger.update);
+    gsap.ticker.add(t => lenis.raf(t * 1000));
+    gsap.ticker.lagSmoothing(0);
+  }
+  const go = id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (lenis) lenis.scrollTo(el, { offset: 0, duration: 1.4 });
+    else el.scrollIntoView({ behavior: reduce ? "auto" : "smooth" });
+  };
+  $$("[data-go]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); go(a.dataset.go); }));
+  $("#year").textContent = new Date().getFullYear();
+
+  /* ---------- barra: relógio de Niterói, capítulo e progresso ---------- */
+  const clock = $("#clock");
+  const hhmm = () => new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" }).format(new Date());
+  const tickClock = () => { clock.textContent = `Niterói ${hhmm()}`; };
+  tickClock(); setInterval(tickClock, 15000);
+  const bar = $("#bar"), chapN = $("#chap-n"), chapT = $("#chap-t"), progress = $("#progress");
+  const chapIO = new IntersectionObserver(es => es.forEach(e => {
+    if (!e.isIntersecting) return;
+    chapN.textContent = e.target.dataset.chap; chapT.textContent = e.target.dataset.title;
+    bar.classList.toggle("named", e.target.id !== "topo");
+  }), { rootMargin: "-45% 0px -54% 0px" });
+  $$("[data-chap]").forEach(s => chapIO.observe(s));
+
+  /* ---------- 00 · o mapa e as estações ao vivo ---------- */
+  const GEO = { lon0: -43.1622, lon1: -42.935, lat0: -22.9791, lat1: -22.851, w: 2000, h: 1225 };
+  const toMap = (lon, lat) => [(lon - GEO.lon0) / (GEO.lon1 - GEO.lon0) * GEO.w, (GEO.lat1 - lat) / (GEO.lat1 - GEO.lat0) * GEO.h];
+  const stations = new Map(D.stations.map(([n, name, lon, lat, cap]) => [n, { n, name, lon, lat, cap, bikes: null, free: null }]));
+  const svg = $("#heroSt"), tip = $("#heroTip"), mapEl = $("#heroMap");
+  const NS = "http://www.w3.org/2000/svg";
+  const nodes = new Map();
+  let k = 0;
+  stations.forEach(s => {
+    const [x, y] = toMap(s.lon, s.lat);
+    s.x = x; s.y = y;
+    const g = document.createElementNS(NS, "g");
+    // só algumas estações pulsam: cada anel animado repinta a camada do mapa
+    const ring = k++ % 8 === 0 ? `<circle class="ring" cx="${x}" cy="${y}" r="6" style="--d:${(k % 5) * 0.7}s"/>` : `<circle class="ring" cx="${x}" cy="${y}" r="0"/>`;
+    g.innerHTML = `<circle class="halo" cx="${x}" cy="${y}" r="9"/>${ring}<circle cx="${x}" cy="${y}" r="3.2"/>`;
+    svg.appendChild(g);
+    nodes.set(s.n, g);
+    const show = () => {
+      const r = g.getBoundingClientRect(), st = mapEl.parentElement.getBoundingClientRect();
+      tip.innerHTML = `<b>${s.name}</b>${s.bikes == null ? `estação ${s.n} · ${s.cap} vagas no total` : `${s.bikes} bikes paradas · ${s.free} vagas livres`}`;
+      tip.style.left = `${r.left + r.width / 2 - st.left}px`; tip.style.top = `${r.top - st.top}px`;
+      tip.classList.add("on"); g.classList.add("on");
+    };
+    const hide = () => { tip.classList.remove("on"); g.classList.remove("on"); };
+    g.addEventListener("pointerenter", show); g.addEventListener("focus", show);
+    g.addEventListener("pointerleave", hide); g.addEventListener("blur", hide);
+  });
+  const sizeStations = () => stations.forEach(s => {
+    const g = nodes.get(s.n), fill = s.bikes == null ? 0.5 : Math.min(1, s.bikes / Math.max(1, s.cap));
+    const r = 2.2 + fill * 4.2;
+    g.children[2].setAttribute("r", r.toFixed(1));
+    g.children[0].setAttribute("r", (r + 5).toFixed(1));
+  });
+  sizeStations();
+  // os anéis param quando a abertura sai da tela
+  new IntersectionObserver(([e]) => svg.classList.toggle("still", !e.isIntersecting)).observe($(".hero"));
+
+  const live = $("#heroLive span");
+  const LAYER = "https://services8.arcgis.com/TpaOLI1HCh5AcRQB/ArcGIS/rest/services/NGP_SEMOBI_NITBIKE_P_ESTACOES_DE_BICICLETA/FeatureServer/5/query?where=1%3D1&outFields=si_stationNumber,si_bikeAvailable,si_positionAvailable,dt_atualizado&returnGeometry=false&f=json";
+  let lastRead = null;
+  const readLive = () => fetch(LAYER, { cache: "no-store" }).then(r => r.json()).then(d => {
+    let bikes = 0, n = 0, newest = 0;
+    (d.features || []).forEach(({ attributes: a }) => {
+      const s = stations.get(a.si_stationNumber);
+      if (!s) return;
+      s.bikes = a.si_bikeAvailable ?? 0; s.free = a.si_positionAvailable ?? 0;
+      bikes += s.bikes; n++; newest = Math.max(newest, a.dt_atualizado || 0);
+    });
+    if (!n) throw new Error("vazio");
+    sizeStations();
+    lastRead = { bikes, n, at: newest ? new Date(newest) : new Date() };
+    const at = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" }).format(lastRead.at);
+    live.textContent = `ao vivo · ${fmt(bikes)} bikes paradas em ${n} estações · leitura das ${at}`;
+    tripLive();
+  }).catch(() => { live.textContent = "camada pública fora do ar agora · mostrando as posições das estações"; });
+  readLive(); setInterval(readLive, 60000);
+
+  // câmera: no começo a rede inteira à direita do nome; ao rolar, desce até o Terminal (estação 4), no Centro
+  const term = stations.get(4) || [...stations.values()][0];
+  let Z1 = 2.6;
+  const camera = p => {
+    const vw = innerWidth, vh = innerHeight, mob = !wide();
+    const zA = mob ? 0.95 : Math.max(1.1, Math.min(1.75, vw / 900)), zB = mob ? 2.1 : 2.6;
+    const ax = mob ? 0.62 : 0.66, ay = mob ? 0.34 : 0.42;
+    const A = { x: vw * ax - 450 * zA, y: vh * ay - 430 * zA, z: zA };
+    const B = { x: vw * 0.5 - term.x * zB, y: vh * 0.42 - term.y * zB, z: zB };
+    const e = p * p * (3 - 2 * p);
+    const z = A.z + (B.z - A.z) * e;
+    const x = A.x + (B.x - A.x) * e, y = A.y + (B.y - A.y) * e;
+    mapEl.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) scale(${(z / Z1).toFixed(4)})`;
+  };
+  const sizeMap = () => {
+    Z1 = wide() ? 2.6 : 2.1;
+    Object.assign(mapEl.style, { left: "0px", top: "0px", margin: "0", width: `${2000 * Z1}px`, height: `${1225 * Z1}px` });
+  };
+  sizeMap(); camera(0);
+  addEventListener("resize", () => { sizeMap(); camera(heroP); });
+  let heroP = 0;
+
+  /* ---------- 01 · quem ---------- */
+  $("#whoFacts").innerHTML = D.facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
+  $("#whoStats").innerHTML = D.stats.map(([v, l]) => `<div><b data-to="${v}">${reduce ? v : 0}</b><span>${l}</span></div>`).join("");
+  const say = $(".who-say");
+  say.innerHTML = say.textContent.split(" ").map(w => `<span class="w">${w}</span>`).join(" ");
+  const countIO = new IntersectionObserver(es => es.forEach(e => {
+    if (!e.isIntersecting) return;
+    countIO.unobserve(e.target);
+    const b = e.target, to = +b.dataset.to, t0 = performance.now();
+    const step = now => { const p = Math.min(1, (now - t0) / 1400); b.textContent = Math.round(to * (1 - Math.pow(1 - p, 3))); if (p < 1) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  }), { threshold: 0.6 });
+  if (!reduce) $$("#whoStats b").forEach(b => countIO.observe(b));
+
+  /* ---------- 02 · o caminho do dado ---------- */
+  // UTM zona 23 Sul (SIRGAS 2000 / EPSG 31983), a conversão que o update_arcgis faz antes de gravar na camada
+  const toUTM23S = (lon, lat) => {
+    const a = 6378137, f = 1 / 298.257222101, k0 = 0.9996, e2 = f * (2 - f), ep2 = e2 / (1 - e2);
+    const rad = Math.PI / 180, lon0 = -45 * rad, phi = lat * rad, lam = lon * rad;
+    const N = a / Math.sqrt(1 - e2 * Math.sin(phi) ** 2), T = Math.tan(phi) ** 2, C = ep2 * Math.cos(phi) ** 2, A = Math.cos(phi) * (lam - lon0);
+    const M = a * ((1 - e2 / 4 - 3 * e2 ** 2 / 64 - 5 * e2 ** 3 / 256) * phi - (3 * e2 / 8 + 3 * e2 ** 2 / 32 + 45 * e2 ** 3 / 1024) * Math.sin(2 * phi) + (15 * e2 ** 2 / 256 + 45 * e2 ** 3 / 1024) * Math.sin(4 * phi) - (35 * e2 ** 3 / 3072) * Math.sin(6 * phi));
+    const E = 500000 + k0 * N * (A + (1 - T + C) * A ** 3 / 6 + (5 - 18 * T + T ** 2 + 72 * C - 58 * ep2) * A ** 5 / 120);
+    const Nn = 10000000 + k0 * (M + N * Math.tan(phi) * (A ** 2 / 2 + (5 - T + 9 * C + 4 * C ** 2) * A ** 4 / 24 + (61 - 58 * T + T ** 2 + 600 * C - 330 * ep2) * A ** 6 / 720));
+    return [E, Nn];
+  };
+  const [uE, uN] = toUTM23S(term.lon, term.lat);
+  const nf = (v, d = 2) => v.toLocaleString("pt-BR", { minimumFractionDigits: d, maximumFractionDigits: d });
+  /* ---------- 02 + 03 · a viagem do dado: uma cena só, em WebGL ---------- */
+  // os 65 pontos da cena são as estações: mudam de forma a cada etapa e terminam como uma das seis camadas do Gêmeo.
+  // A rolagem só entrega um número (0 a 1); quem desenha é o scene.js, no próprio relógio.
+  const tripEl = $(".trip"), tripRun = $("#tripRun"), tripStage = $("#tripStage");
+  const lay = [...D.layers], LN = lay.length;
+  const CAPS = [
+    { t: "Feed", k: "API · a cada 10 s", h: `A cada 10 s, a API do NitBike <em>fala.</em>`,
+      p: `A cada <strong>10 s</strong>, a API informa as bikes paradas e as vagas livres de cada uma das <strong>65 estações</strong>. Solto, isso é só uma fila de números.`,
+      hud: `<pre class="code" id="feedArt"></pre>` },
+    { t: "Coleta", k: "Prefect · a cada 10 s", h: `Python que <em>não para.</em>`,
+      p: `Um fluxo em Python lê as 65 estações e grava um <strong>snapshot</strong> no PostgreSQL. O Prefect cuida do agendamento e não deixa duas coletas rodarem juntas.`,
+      hud: `<pre class="code"><span class="k">@flow</span>(name=<span class="s">"coleta_nitbike"</span>)
+<span class="k">def</span> <span class="n">coletar</span>():
+    estacoes = api.estacoes()  <span class="c"># 65</span>
+    snap = padronizar(estacoes)
+    banco.gravar(<span class="s">"snapshots"</span>, snap)
+
+<span class="c"># agenda: a cada 10 s</span></pre>` },
+    { t: "Banco", k: "PostgreSQL · janela de 5 min", h: `A janela de <em>5 minutos.</em>`,
+      p: `A cada minuto, aos :30, a publicação lê a <strong>janela dos últimos 5 min</strong> (30 snapshots) e compara: subiu, entraram bikes; caiu, saíram. Os 30 s mais recentes ficam para a próxima. O que já saiu da janela é apagado.`,
+      hud: `<div class="key"><span class="k-old">apagados</span><span class="k-win">na janela</span><span class="k-new">últimos 30 s</span></div>` },
+    { t: "Camada", k: "ArcGIS · 1 por minuto", h: `Coordenadas que o mapa <em>entende.</em>`,
+      p: `Antes de gravar no ArcGIS, cada ponto sai de latitude e longitude para <strong>SIRGAS 2000 / UTM 23S</strong> (EPSG 31983). A camada guarda entradas, saídas, fluxo e o ranking de cada estação. O pico do dia só é regravado quando o total passa dele, e reinicia quando o dia vira.`,
+      hud: `<div class="utm"><small>Estação ${term.n} · ${term.name}</small><b>${nf(term.lat, 5)}, ${nf(term.lon, 5)}</b><i>↓ EPSG 4326 → EPSG 31983</i><div><span><small>Leste</small><b>${nf(uE)} m</b></span><span><small>Norte</small><b>${nf(uN)} m</b></span></div></div>` },
+    { t: "Mapa", k: "Gêmeo Digital", h: `Do feed ao mapa, <em>um minuto.</em>`,
+      p: `O Gêmeo plota as estações ao lado das outras fontes oficiais: trânsito do Waze (a cada 2 min), ônibus, câmeras, chuva e edificações em 3D. Do feed ao mapa, um minuto.`,
+      hud: `<div class="now"><b id="tripBikes">…</b><span id="tripAt">bikes paradas · lendo a camada pública</span></div>` },
+    { t: "Camadas", k: "6 fontes oficiais", h: `Seis camadas no Gêmeo. <em>Duas são minhas.</em>`,
+      p: `O Gêmeo Digital de Niterói junta dados oficiais em tempo real para planejar e monitorar a cidade. Eu cuido do trânsito e do NitBike.`,
+      hud: `<ol class="cap-layers">${lay.slice().reverse().map((l, i) => `<li class="${l.mine ? "mine" : ""}" data-layer="${LN - 1 - i}" tabindex="0"><b>${l.name}</b> ${l.source}</li>`).join("")}</ol>
+        <a class="pill pill-line" href="https://gemeo.niteroi.rj.gov.br/" target="_blank" rel="noopener noreferrer">Abrir o Gêmeo Digital ↗</a>
+        <p class="cap-note">Pontos nas posições reais das camadas públicas, no recorte do Centro e de Icaraí. O trânsito é lido agora no Waze; os prédios são ilustrativos.</p>`, keep: true },
+  ];
+  $("#tripCaps").innerHTML = CAPS.map((c, i) => `<article class="cap" id="cap-${i}"><span class="cap-k"><b>0${i + 1}</b>/0${CAPS.length} · ${c.t}<i>${c.k}</i></span><h3>${c.h}</h3><p>${c.p}</p><div class="cap-hud${c.keep ? " keep" : ""}">${c.hud}</div></article>`).join("");
+  $("#tripRail").innerHTML = CAPS.map((c, i) => `<button type="button" aria-label="Etapa ${i + 1}: ${c.t}"><i class="rl"><i></i></i><span>0${i + 1}</span><b>${c.t}</b></button>`).join("");
+  $("#tripTags").innerHTML = lay.map((l, i) => `<span class="trip-tag${l.mine ? " mine" : ""}" data-layer="${i}"><b>0${i + 1}</b>${l.name}<em></em></span>`).join("");
+  const caps = $$(".cap", tripEl), railBtns = $$("#tripRail button"), railFills = $$("#tripRail .rl > i"), tripTags = $$(".trip-tag", tripEl);
+  const iBike = lay.findIndex(l => l.name === "NitBike"), iWaze = lay.findIndex(l => l.name === "Trânsito");
+
+  const B = [0, 0.13, 0.27, 0.42, 0.56, 0.70, 1];
+  const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  let layAt = -1;
+  const layEls = $$("[data-layer]", tripEl);
+  let trip = null, tripST = null, tripP = 0, capAt = -1, tripSeen = false, wazePts = null;
+  const railW = railFills.map(() => -1);
+  const tripTo = p => {
+    tripP = p;
+    let i = 0; while (i < 5 && p >= B[i + 1]) i++;
+    const st = i >= 5 ? 5 : i + ss(0.6, 1, (p - B[i]) / (B[i + 1] - B[i]));
+    if (trip) trip.set(st, ss(0.70, 0.88, p));
+    if (p < 0.8 && layAt >= 0) focusLayer(-1);
+    const at = Math.round(st);
+    if (at !== capAt) {
+      capAt = at;
+      caps.forEach((c, j) => c.classList.toggle("on", j === at));
+      railBtns.forEach((b, j) => { b.classList.toggle("on", j === at); b.setAttribute("aria-current", j === at ? "step" : "false"); });
+    }
+    railFills.forEach((f, j) => {
+      const w = Math.round(Math.min(1, Math.max(0, (p - B[j]) / (B[j + 1] - B[j]))) * 500) / 500;
+      if (w !== railW[j]) { railW[j] = w; f.style.transform = `scaleX(${w})`; }
+    });
+    // a barra de cima troca de capítulo quando as camadas se separam
+    const n = p >= 0.68 ? "03" : "02";
+    if (tripSeen && chapN.textContent !== n) { chapN.textContent = n; chapT.textContent = n === "03" ? "Camadas" : "O caminho do dado"; }
+  };
+  railBtns.forEach((b, i) => b.addEventListener("click", () => {
+    if (!tripST) return;
+    const y = tripST.start + (tripST.end - tripST.start) * (i === 5 ? 0.9 : B[i] + 0.015);
+    if (lenis) lenis.scrollTo(y, { duration: 1.1 }); else scrollTo({ top: y, behavior: "smooth" });
+  }));
+  tripTo(0);
+
+  // destaque de uma camada: pelo texto, pela etiqueta ou pela própria lâmina na cena
+  function focusLayer(k) {
+    if (k === layAt) return; layAt = k;
+    tripStage.classList.toggle("pick", k >= 0);
+    layEls.forEach(el => el.classList.toggle("hot", +el.dataset.layer === k));
+    if (trip) trip.focus(k);
+  }
+  layEls.forEach(el => {
+    const k = +el.dataset.layer;
+    el.addEventListener("pointerenter", e => { if (e.pointerType === "mouse") focusLayer(k); });
+    el.addEventListener("pointerleave", e => { if (e.pointerType === "mouse") focusLayer(-1); });
+    el.addEventListener("focus", () => focusLayer(k));
+    el.addEventListener("blur", () => focusLayer(-1));
+    el.addEventListener("click", () => focusLayer(layAt === k ? -1 : k));
+  });
+
+  function tripLive() {
+    const s = term;
+    $("#feedArt").innerHTML = `<span class="c">GET /estacoes · ${lastRead ? "agora" : "retrato"}</span>
+{
+  <span class="n">"estacao"</span>: ${s.n},
+  <span class="n">"nome"</span>: <span class="s">"${s.name}"</span>,
+  <span class="n">"bikes"</span>: ${s.bikes ?? "…"},
+  <span class="n">"vagas"</span>: ${s.free ?? "…"},
+  <span class="n">"lat"</span>: ${s.lat},
+  <span class="n">"lon"</span>: ${s.lon}
+}`;
+    if (lastRead) {
+      $("#tripBikes").textContent = fmt(lastRead.bikes);
+      $("#tripAt").textContent = `bikes paradas em ${lastRead.n} estações · leitura das ${new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" }).format(lastRead.at)}`;
+      tripTags[iBike].querySelector("em").textContent = `${fmt(lastRead.bikes)} bikes agora`;
+    }
+    if (trip) trip.setBikes();
+  }
+  tripLive();
+
+  // a cena e os alertas do Waze só são buscados quando a viagem chega perto da tela
+  const WAZE = "https://services8.arcgis.com/TpaOLI1HCh5AcRQB/ArcGIS/rest/services/WAZE_Alertas_LIVE/FeatureServer/0/query?where=1%3D1&outFields=db_lat,db_long&returnGeometry=false&f=json";
+  let tripVisible = false;
+  const tripFlat = () => { tripEl.classList.add("flat"); if (hasGsap) ScrollTrigger.refresh(); };
+  const loadTrip = () => {
+    fetch(WAZE).then(r => r.json()).then(d => {
+      const pts = (d.features || []).map(f => toMap(+f.attributes.db_long, +f.attributes.db_lat)).filter(p => isFinite(p[0]) && isFinite(p[1]));
+      if (!pts.length) return;
+      wazePts = pts;
+      tripTags[iWaze].querySelector("em").textContent = `${pts.length} alertas agora`;
+      if (trip) trip.setWaze(pts);
+    }).catch(() => {});
+    import("./scene.js").then(m => {
+      trip = m.createTrip({ canvas: $("#tripGL"), stations: [...stations.values()], term, geo: window.KMGEO || { cams: [], gauges: [], routes: [] }, layers: lay, mapSrc: "mapa-niteroi.svg", tagEls: tripTags, onFocus: focusLayer });
+      trip.setBikes(); if (wazePts) trip.setWaze(wazePts);
+      tripTo(tripP);
+      if (tripVisible) trip.start();
+      addEventListener("resize", () => trip.resize());
+      requestAnimationFrame(() => tripEl.classList.add("gl"));
+    }).catch(tripFlat);
+  };
+  if (hasGsap && !reduce) {
+    const nearIO = new IntersectionObserver(([e]) => { if (e.isIntersecting) { nearIO.disconnect(); loadTrip(); } }, { rootMargin: "150% 0px" });
+    nearIO.observe(tripEl);
+    new IntersectionObserver(([e]) => { tripVisible = tripSeen = e.isIntersecting; if (trip) trip[tripVisible ? "start" : "stop"](); }).observe(tripStage);
+  }
+
+  /* ---------- 03 · outras frentes: Colab e a prova de conceito ---------- */
+  const C = D.colab, cMax = Math.max(...C.series.map(s => s[1])), cLast = C.series.length - 1;
+  $("#civic").innerHTML = `<div class="civ-top">
+      <div class="civ-big"><p class="eyebrow">05 — Outras frentes · Colab</p><b>${C.kpis[0][0]}</b><span>${C.kpis[0][1]}</span></div>
+      <div class="civ-side"><h3>Pedidos dos moradores, <em>no mapa</em></h3><p class="lead">${C.pitch}</p>
+        <div class="split" aria-hidden="true"><i style="flex:${parseInt(C.kpis[1][0])}"></i><i style="flex:${parseInt(C.kpis[2][0])}"></i></div>
+        <div class="split-k"><span><b>${C.kpis[1][0]}</b> ${C.kpis[1][1]}</span><span><b>${C.kpis[2][0]}</b> ${C.kpis[2][1]}</span></div></div>
+    </div>
+    <div class="sky" id="sky" role="img" aria-label="Solicitações por ano, de ${C.series[0][0]} a ${C.series[cLast][0]}">${C.series.map(([y, v], i) => `<div class="${v === cMax ? "peak" : ""}${i === cLast ? " last" : ""}" style="--v:${(v / cMax).toFixed(3)};--d:${(i * 0.035 + i * i * 0.003).toFixed(3)}s"><b>${fmt(v)}${i === cLast ? " · parcial" : ""}</b><i></i><small>${String(y).slice(2)}</small></div>`).join("")}</div>
+    <p class="src">Solicitações por ano · ${C.source}</p>
+    <div class="civ-mine"><p class="eyebrow">O que eu fiz ali</p><ol>${C.mine.map(m => `<li>${m}</li>`).join("")}</ol>
+      <a class="pill pill-line" href="${C.url}" target="_blank" rel="noopener noreferrer">Ver o painel ↗</a></div>
+    <div class="poc"><div class="poc-head"><div><p class="eyebrow">Prova de conceito · em andamento</p><h3>Prever o trânsito <em>antes de ele travar</em></h3></div><p class="lead">${D.poc.pitch}</p></div>
+      <ol class="poc-line">${D.poc.steps.map((s, i) => `<li><small>0${i + 1}</small><b>${s}</b><span>a fazer</span></li>`).join("")}</ol></div>`;
+  // cada bloco entra uma vez, quando chega à tela
+  const onceIO = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { onceIO.unobserve(e.target); e.target.classList.add("on"); } }), { threshold: 0.3 });
+  $$("#civic .civ-top, #sky, #civic .poc-line").forEach(el => onceIO.observe(el));
+
+  /* ---------- 04 · laboratório (página isolada, carrega perto) ---------- */
+  // o laboratório é pesado (o React do site inteiro): carregar no meio da rolagem trava quadros,
+  // então ele entra num momento ocioso logo depois da abertura, ou antes, se a pessoa chegar perto
+  const labFrame = $("#labFrame");
+  let labOn = false;
+  const loadLab = () => {
+    if (labOn) return; labOn = true;
+    const f = document.createElement("iframe");
+    f.src = "lab.html"; f.title = "Gêmeo simplificado e pipeline do NitBike";
+    labFrame.innerHTML = ""; labFrame.appendChild(f);
+  };
+  const idle = window.requestIdleCallback || (fn => setTimeout(fn, 1));
+  addEventListener("load", () => setTimeout(() => idle(loadLab, { timeout: 4000 }), 1800));
+  const labIO = new IntersectionObserver(es => { if (es[0].isIntersecting) { labIO.disconnect(); loadLab(); } }, { rootMargin: "200% 0px" });
+  labIO.observe(labFrame);
+  // a altura do quadro muda muitas vezes enquanto o React monta: o refresh só roda quando ela assenta
+  let labH = 0, labT = 0;
+  addEventListener("message", e => {
+    if (e.origin !== location.origin || !e.data || e.data.type !== "lab-height") return;
+    const nh = Math.ceil(e.data.h);
+    if (Math.abs(nh - labH) <= 2) return;
+    labH = nh; labFrame.style.setProperty("--h", `${nh}px`);
+    if (hasGsap) { clearTimeout(labT); labT = setTimeout(() => ScrollTrigger.refresh(), 220); }
+  });
+
+  /* ---------- 05 · quadro de partidas ---------- */
+  const flap = $("#flap");
+  const W = { when: 8, to: 21, what: 23, status: 9 };
+  const pad = (s, n) => s.toUpperCase().padEnd(n, " ").slice(0, n);
+  const cells = (s, n) => [...pad(s, n)].map(c => `<span class="cell" data-c="${c === " " ? "&nbsp;" : c}">&nbsp;</span>`).join("");
+  flap.innerHTML = `<div class="flap-row head" role="row"><span role="columnheader">Partida</span><span role="columnheader">Destino</span><span role="columnheader">Função</span><span role="columnheader">Situação</span></div>` +
+    D.departures.map(d => `<div class="flap-row" role="row"><span class="flap-cells" role="cell" aria-label="${d.when}">${cells(d.when, W.when)}</span><span class="flap-cells" role="cell" aria-label="${d.to}">${cells(d.to, W.to)}</span><span class="flap-cells" role="cell" aria-label="${d.what}">${cells(d.what, W.what)}</span><span class="flap-cells st${d.status === "CONCLUÍDO" ? " done" : ""}" role="cell" aria-label="${d.status}">${cells(d.status, W.status)}</span></div>`).join("");
+  $$(".cell", flap).forEach(c => c.setAttribute("aria-hidden", "true"));
+  const GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789·";
+  const runFlap = () => {
+    $$(".flap-row:not(.head)", flap).forEach((row, r) => $$(".cell", row).forEach((c, i) => {
+      const target = c.dataset.c, turns = reduce ? 0 : 4 + ((i * 7 + r * 3) % 9);
+      let n = 0;
+      const step = () => {
+        if (n >= turns) { c.innerHTML = target; c.classList.remove("flip"); return; }
+        c.textContent = GLYPHS[(i * 5 + n * 11 + r) % GLYPHS.length];
+        c.classList.remove("flip"); void c.offsetWidth; c.classList.add("flip");
+        n++; setTimeout(step, 70);
+      };
+      setTimeout(step, reduce ? 0 : r * 160 + i * 18);
+    }));
+  };
+  const flapIO = new IntersectionObserver(es => { if (es[0].isIntersecting) { flapIO.disconnect(); runFlap(); } }, { threshold: 0.35 });
+  flapIO.observe(flap);
+
+  $("#lines").innerHTML = D.lines.map((l, i) => `<li><button class="line-btn" type="button" aria-expanded="false" aria-controls="line-${i}"><span class="line-n">${l.n}</span><span class="line-t">${l.title}</span><span class="line-w">${l.where}</span><span class="line-x" aria-hidden="true"></span></button><div class="line-body" id="line-${i}"><div><div class="line-in"><p>${l.text}</p><div class="chips">${l.tech.map(t => `<span>${t}</span>`).join("")}</div></div></div></div></li>`).join("");
+  $$(".line-btn").forEach(b => b.addEventListener("click", () => {
+    const li = b.parentElement, open = !li.classList.contains("open");
+    li.classList.toggle("open", open); b.setAttribute("aria-expanded", open);
+    if (hasGsap) setTimeout(() => ScrollTrigger.refresh(), 480);
+  }));
+
+  /* ---------- 06 · projetos: uma página por projeto, com a demonstração em 3D de CSS ---------- */
+  // as três demonstrações são montadas uma vez; depois só mudam transform e opacity
+  const UFS = [["RR", 2, 1], ["AP", 4, 1], ["AM", 1, 2], ["PA", 3, 2], ["MA", 4, 2], ["CE", 5, 2], ["RN", 6, 2], ["AC", 0, 3], ["RO", 1, 3], ["TO", 3, 3], ["PI", 4, 3], ["PE", 5, 3], ["PB", 6, 3], ["MT", 2, 4], ["GO", 3, 4], ["BA", 4, 4], ["SE", 5, 4], ["AL", 6, 4], ["MS", 2, 5], ["DF", 3, 5], ["MG", 4, 5], ["ES", 5, 5], ["PR", 2, 6], ["SP", 3, 6], ["RJ", 4, 6], ["SC", 2, 7], ["RS", 2, 8]];
+  // a casinha: peças [x, y, largura, fundo, camada] em pinos. As paredes alternam a amarração a cada camada,
+  // a porta fica na frente e o telhado são três placas escuras
+  const EVEN = [[0, 6, 4, 2], [4, 6, 4, 2], [8, 6, 4, 2], [0, 0, 4, 2], [4, 0, 4, 2], [8, 0, 4, 2], [0, 2, 2, 4], [10, 2, 2, 4]];
+  const ODD = [[2, 6, 4, 2], [6, 6, 4, 2], [2, 0, 4, 2], [6, 0, 4, 2], [0, 0, 2, 4], [0, 4, 2, 4], [10, 0, 2, 4], [10, 4, 2, 4]];
+  const DOOR0 = [[0, 6, 4, 2], [8, 6, 4, 2]], DOOR1 = [[2, 6, 2, 2], [8, 6, 2, 2]];
+  const front = b => b[1] === 6 && b[3] === 2;
+  const bricks = [
+    ...[EVEN.filter(b => !front(b)).concat(DOOR0), ODD.filter(b => !front(b)).concat(DOOR1), EVEN, ODD].flatMap((row, r) => row.map(([x, y, w, d]) => ({ x, y, w, d, r }))),
+    { x: 0, y: 0, w: 12, d: 8, r: 4, roof: 1 }, { x: 2, y: 2, w: 8, d: 4, r: 5, roof: 1 }, { x: 4, y: 3, w: 4, d: 2, r: 6, roof: 1 },
+  ];
+  // concursos de exemplo, no formato real da mensagem do bot (formatar_concurso)
+  const EDITAIS = [
+    ["Prefeitura de Exemplo — Analista de Dados", "RJ", "R$ 9.800,00", "12", "28/11/2026", "Superior"],
+    ["Instituto Modelo — Técnico em Informática", "RJ", "R$ 5.400,00", "30", "05/12/2026", "Técnico"],
+    ["Tribunal Fictício — Analista de Sistemas", "SP", "R$ 13.900,00", "8", "14/12/2026", "Superior"],
+    ["Autarquia Demonstração — Desenvolvedor", "MG", "R$ 8.200,00", "6", "20/12/2026", "Superior"],
+    ["Universidade Exemplo — Cientista de Dados", "RJ", "R$ 11.300,00", "4", "09/01/2027", "Superior"],
+  ];
+  const edital = ([t, uf, sal, vagas, ate, nivel]) => `<div class="tg"><div class="tg-b"><p class="tg-t">🔔 <b>${t}</b> <i>(${uf})</i></p><p>💵 <b>Salário máximo:</b> ${sal}</p><p>🏢 <b>Vagas:</b> ${vagas}</p><p>📅 <b>Inscrições até:</b> ${ate}</p><p>🎓 <b>Nível:</b> ${nivel}</p><p class="tg-l">🔗 link do edital</p></div><button type="button" class="tg-fav" aria-pressed="false">⭐ Favoritar</button></div>`;
+  const demos = {
+    concurso: `<span class="demo-note">exemplo · concursos fictícios</span><div class="d3 d3-phone"><i class="d3-floor"></i><div class="phone">
+        <div class="ph-top"><i></i><div><b>Concurso Notifier</b><small>bot · alertas a cada 17 min</small></div></div>
+        <div class="chat"><div class="feed" id="tgFeed">${edital(EDITAIS[0])}</div></div></div>
+      <span class="fchip c1">estado · RJ</span><span class="fchip c2">nível · superior</span><span class="fchip c3">palavra · dados</span></div>`,
+    // mapa de ladrilhos do Brasil (coluna, linha): altura e cor são só ilustração, sem dado real
+    saude: `<span class="demo-note">ilustração · sem dados reais</span><div class="d3 d3-uf"><div class="uf-plane">${UFS.map(([u, c, r], i) => {
+      const a = 0.22 + ((u.charCodeAt(0) * 7 + u.charCodeAt(1) * 3) % 55) / 100;
+      return `<span class="t" style="grid-column:${c + 1};grid-row:${r};--a:${a.toFixed(2)};--h:${(0.35 + (a - 0.22) * 4.2).toFixed(2)}em;--d:${(0.1 + (c + r) * 0.05 + (i % 3) * 0.03).toFixed(2)}s"><i class="tt">${u}</i><i class="ts"></i><i class="te"></i></span>`;
+    }).join("")}</div></div>`,
+    mocforge: `<span class="demo-note">ilustração</span><div class="mcp"><p class="prompt">monte uma casinha de tijolos vermelhos</p><p class="call">add_parts_batch_tool · ${bricks.length} peças</p><p class="call">render_view_tool · conferindo</p></div>
+      <div class="d3 d3-bk"><div class="bk-plane">${bricks.map((b, i) => `<span class="bk${b.roof ? " roof" : ""}" style="--x:${b.x}em;--y:${b.y}em;--z:${(b.r * 1.2).toFixed(1)}em;--w:${b.w}em;--dd:${b.d}em;--d:${(0.5 + i * 0.05).toFixed(2)}s"><i class="bt"></i><i class="bs"></i><i class="bw"></i></span>`).join("")}</div></div>`,
+  };
+  $("#pjList").innerHTML = D.projects.map((p, i) => `<article class="pj" data-id="${p.id}" aria-label="${p.title}">
+    <div class="wrap pj-grid">
+      <div class="pj-copy"><span class="pj-n" aria-hidden="true">0${i + 1}</span><p class="pj-k">${p.kicker}</p><h3>${p.title}</h3><p class="pj-sum">${p.summary}</p>
+        <ol class="pj-pts">${p.bullets.map(b => `<li>${b}</li>`).join("")}</ol>
+        <p class="pj-tech">${p.tech.join(" · ")}</p>
+        ${p.repo ? `<a class="pill pill-accent" href="${p.repo}" target="_blank" rel="noopener noreferrer">Ver no GitHub ↗</a>` : `<span class="pj-k">código privado</span>`}</div>
+      <div class="pj-demo">${demos[p.id]}</div>
+    </div></article>`).join("");
+  const pjs = $$(".pj");
+  // cada projeto monta a demonstração uma vez; fora da tela, o que flutua pausa
+  const pjOnce = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { pjOnce.unobserve(e.target); e.target.classList.add("on"); } }), { threshold: 0.3 });
+  const pjLive = new IntersectionObserver(es => es.forEach(e => e.target.classList.toggle("live", e.isIntersecting)));
+  pjs.forEach(p => { pjOnce.observe(p); pjLive.observe(p); });
+
+  // o bot em funcionamento: enquanto o telefone está na tela chega um concurso novo de tempos em tempos,
+  // a conversa sobe e um deles é favoritado. O botão também responde ao clique, como no Telegram
+  const tgFeed = $("#tgFeed"), tgPj = tgFeed.closest(".pj");
+  const setFav = (b, on) => { b.classList.toggle("fav", on); b.setAttribute("aria-pressed", on); b.textContent = on ? "💔 Remover dos favoritos" : "⭐ Favoritar"; };
+  tgFeed.addEventListener("click", e => { const b = e.target.closest(".tg-fav"); if (b) setFav(b, !b.classList.contains("fav")); });
+  let tgI = 1;
+  const tgNext = () => {
+    if (!tgPj.classList.contains("live") || document.hidden) return;
+    tgFeed.insertAdjacentHTML("beforeend", edital(EDITAIS[tgI % EDITAIS.length]));
+    const el = tgFeed.lastElementChild, n = tgI++;
+    while (tgFeed.children.length > 4) tgFeed.firstElementChild.remove();
+    // a conversa já está na posição final; ela começa deslocada pela altura da mensagem nova e desliza até lá
+    const dy = el.offsetHeight + 10;
+    tgFeed.style.transition = "none"; tgFeed.style.transform = `translate3d(0, ${dy}px, 0)`;
+    el.classList.add("in");
+    requestAnimationFrame(() => requestAnimationFrame(() => { tgFeed.style.transition = ""; tgFeed.style.transform = ""; el.classList.remove("in"); }));
+    if (n % 2 === 0) setTimeout(() => { const b = el.querySelector(".tg-fav"); if (b.isConnected) { b.classList.add("tap"); setFav(b, true); setTimeout(() => b.classList.remove("tap"), 220); } }, 1500);
+  };
+  if (!reduce) setInterval(tgNext, 3600);
+
+  /* ---------- 07 · ferramentas: o grafo ---------- */
+  const graph = $("#graph");
+  const techs = [...new Set(D.works.flatMap(w => w.tech))].sort((a, b) => D.works.filter(w => w.tech.includes(b)).length - D.works.filter(w => w.tech.includes(a)).length || a.localeCompare(b));
+  const uses = t => D.works.filter(w => w.tech.includes(t)).length;
+  const SAY0 = `${D.works.length} trabalhos · ${techs.length} ferramentas · ${D.works.reduce((n, w) => n + w.tech.length, 0)} ligações`;
+  graph.innerHTML = `<div class="g-col g-left">${D.works.map((w, i) => `<button type="button" data-w="${w.id}" style="--k:${i};--dx:-14px">${w.label}<i>${w.tech.length}</i></button>`).join("")}</div><svg aria-hidden="true"></svg><div class="g-col g-right">${techs.map((t, i) => `<button type="button" data-t="${t}" style="--k:${i};--dx:14px">${t}<i>${uses(t)}</i></button>`).join("")}</div><p class="g-say" id="gSay">${SAY0}</p>`;
+  const gsvg = $("svg", graph), gSay = $("#gSay");
+  let gCur = [];
+  const drawGraph = () => {
+    const box = gsvg.getBoundingClientRect();
+    if (!box.width) return;
+    gsvg.setAttribute("viewBox", `0 0 ${box.width} ${box.height}`);
+    const yOf = el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2 - box.top; };
+    let k = 0;
+    gsvg.innerHTML = D.works.flatMap(w => w.tech.map(t => {
+      const y1 = yOf($(`button[data-w="${w.id}"]`, graph)), y2 = yOf($(`button[data-t="${CSS.escape(t)}"]`, graph)), x2 = box.width;
+      return `<path class="link" pathLength="1" style="--k:${k++}" data-w="${w.id}" data-t="${t}" d="M0 ${y1.toFixed(1)} C ${(x2 * 0.5).toFixed(1)} ${y1.toFixed(1)}, ${(x2 * 0.5).toFixed(1)} ${y2.toFixed(1)}, ${x2} ${y2.toFixed(1)}"/>`;
+    })).join("");
+    if (gCur[1]) focusGraph(...gCur);
+  };
+  const focusGraph = (attr, val) => {
+    gCur = [attr, val];
+    graph.classList.toggle("focus", !!val);
+    $$(".pulse", gsvg).forEach(p => p.remove());
+    // cada ligação acesa ganha um pulso correndo do trabalho para a ferramenta
+    let k = 0;
+    $$(".link", gsvg).forEach(p => {
+      const on = !!val && p.getAttribute(`data-${attr}`) === val;
+      p.classList.toggle("on", on);
+      if (on && !reduce) { const c = p.cloneNode(); c.setAttribute("class", "pulse"); c.style.setProperty("--k", k++); gsvg.appendChild(c); }
+    });
+    const ws = val ? D.works.filter(w => attr === "w" ? w.id === val : w.tech.includes(val)) : [];
+    const on = new Set(ws.flatMap(w => [`w:${w.id}`, ...(attr === "w" ? w.tech.map(t => `t:${t}`) : [`t:${val}`])]));
+    $$(".g-col button", graph).forEach(b => b.classList.toggle("on", on.has(b.dataset.w ? `w:${b.dataset.w}` : `t:${b.dataset.t}`)));
+    gSay.textContent = !val ? SAY0 : attr === "w" ? `${ws[0].label} → ${ws[0].tech.join(", ")}` : `${val} aparece em ${ws.length} ${ws.length === 1 ? "trabalho" : "trabalhos"}: ${ws.map(w => w.label).join(", ")}`;
+  };
+  // enquanto ninguém mexe, o grafo passa sozinho pelos trabalhos; o primeiro toque devolve o controle
+  let tour = null, tourI = 0, touched = false;
+  const stopTour = () => { clearInterval(tour); tour = null; };
+  const hands = () => { if (touched) return; touched = true; stopTour(); };
+  $$(".g-col button", graph).forEach(b => {
+    const attr = b.dataset.w ? "w" : "t", val = b.dataset.w || b.dataset.t;
+    b.addEventListener("pointerenter", e => { if (e.pointerType === "mouse") { hands(); focusGraph(attr, val); } });
+    b.addEventListener("focus", () => { hands(); focusGraph(attr, val); });
+    b.addEventListener("click", () => { hands(); focusGraph(attr, b.classList.contains("on") && graph.dataset.sel === val ? (graph.dataset.sel = "", null) : (graph.dataset.sel = val, val)); });
+  });
+  graph.addEventListener("pointerleave", () => { if (touched && !graph.dataset.sel) focusGraph(); });
+  drawGraph();
+  // redesenha quando os botões mudam de tamanho (fontes, largura) e quando o grafo aparece
+  const graphRO = new ResizeObserver(() => requestAnimationFrame(drawGraph));
+  $$(".g-col", graph).forEach(c => graphRO.observe(c));
+  new IntersectionObserver(([e]) => {
+    if (!e.isIntersecting) { stopTour(); return; }
+    drawGraph();
+    if (!graph.classList.contains("in")) {
+      // os nós entram, depois as linhas se desenham; o "ready" tira os atrasos da entrada
+      requestAnimationFrame(() => graph.classList.add("in"));
+      setTimeout(() => graph.classList.add("ready"), 1700);
+    }
+    if (!touched && !reduce && !tour) tour = setInterval(() => focusGraph("w", D.works[tourI++ % D.works.length].id), 2600);
+  }, { threshold: 0.25 }).observe(graph);
+  document.fonts && document.fonts.ready.then(drawGraph);
+
+  /* ---------- 08 · contato ---------- */
+  const toast = $("#toast");
+  $("#copyMail").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(D.profile.email); toast.textContent = "E-mail copiado"; }
+    catch (e) { toast.textContent = D.profile.email; }
+    toast.classList.add("on"); setTimeout(() => toast.classList.remove("on"), 2200);
+  });
+
+  /* ---------- a coreografia da rolagem ---------- */
+  // nada fica preso por JavaScript: as cenas longas usam position: sticky, e a rolagem só entrega o progresso
+  if (!hasGsap || reduce) {
+    camera(0);
+    // sem rolagem animada a viagem vira texto corrido, etapa por etapa
+    tripEl.classList.add("flat");
+    graph.classList.add("in", "ready");
+    $$(".who-say .w").forEach(w => (w.style.opacity = 1));
+    return;
+  }
+  document.documentElement.classList.add("sc");
+
+  // progresso geral da página na barra (transform, sem layout)
+  ScrollTrigger.create({ start: 0, end: "max", onUpdate: s => { progress.style.transform = `scaleX(${s.progress.toFixed(4)})`; } });
+
+  // entrada da abertura: o nome sobe por linha; o resto chega junto, um passo atrás
+  gsap.from(".hero-name .ln > span", { yPercent: 110, duration: 1.3, ease: "expo.out", stagger: 0.12, delay: 0.15 });
+  gsap.from([".hero-live", ".hero-foot"], { y: 16, opacity: 0, duration: 1, ease: "expo.out", stagger: 0.08, delay: 0.5 });
+  gsap.from(".hero-st", { opacity: 0, duration: 1.6, ease: "power2.out", delay: 0.2 });
+
+  // 00: a câmera desce até o Centro enquanto a abertura fica grudada; o texto sai antes
+  ScrollTrigger.create({ trigger: ".hero", start: "top top", end: "bottom bottom", onUpdate: s => { heroP = s.progress; camera(heroP); } });
+  gsap.to(".hero-copy", { yPercent: -18, opacity: 0, ease: "none", scrollTrigger: { trigger: ".hero", start: "top top", end: "28% top", scrub: true } });
+
+  // 02 + 03: a viagem inteira é um número só
+  tripST = ScrollTrigger.create({ trigger: tripRun, start: "top top", end: "bottom bottom", onUpdate: s => tripTo(s.progress) });
+
+  const mm = gsap.matchMedia();
+  mm.add({ wide: "(min-width: 861px)", narrow: "(max-width: 860px)" }, ctx => {
+    const { wide: isWide } = ctx.conditions;
+    // 01: a frase acende palavra por palavra
+    gsap.to(".who-say .w", { opacity: 1, ease: "none", stagger: 0.12,
+      scrollTrigger: isWide ? { trigger: ".who", start: "top top", end: "bottom bottom", scrub: true } : { trigger: ".who-say", start: "top 72%", end: "bottom 38%", scrub: true } });
+    if (!isWide) return;
+    // 06: a demonstração gira um pouco e o número de fundo anda mais devagar que a página
+    pjs.forEach((p, i) => {
+      const st = { trigger: p, start: "top bottom", end: "bottom top", scrub: true };
+      gsap.fromTo(p.querySelector(".d3"), { rotateY: i % 2 ? 9 : -9, yPercent: 5 }, { rotateY: i % 2 ? -9 : 9, yPercent: -5, ease: "none", scrollTrigger: st });
+    });
+  });
+
+  // 06: a barra fica creme enquanto os projetos estão na tela
+  ScrollTrigger.create({ trigger: ".pjs", start: "top 40px", end: "bottom 40px", toggleClass: { targets: document.documentElement, className: "deck-on" } });
+
+  // títulos que entram por linha, uma vez
+  $$(".rise").forEach(t => gsap.from(t.querySelectorAll(".ln > span"), { yPercent: 108, duration: 1.2, ease: "expo.out", stagger: 0.1, scrollTrigger: { trigger: t, start: "top 85%" } }));
+
+  document.fonts && document.fonts.ready.then(() => ScrollTrigger.refresh());
+  addEventListener("load", () => ScrollTrigger.refresh());
+})();

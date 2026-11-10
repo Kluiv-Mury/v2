@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kluivert Mury · Dados da cidade para o mapa</title>
+  <meta name="description" content="Kluivert Mury, desenvolvedor Python de backend e dados. No Escritório de Dados da Prefeitura de Niterói, levo os dados do NitBike e do trânsito até o Gêmeo Digital da cidade." />
+  <meta name="theme-color" content="#0e0d0b" />
+  <meta property="og:title" content="Kluivert Mury · Dados da cidade para o mapa" />
+  <meta property="og:description" content="Desenvolvedor Python de backend e dados no Escritório de Dados da Prefeitura de Niterói." />
+  <meta property="og:image" content="og.jpg" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23ff5a1f'/%3E%3Ctext x='50%25' y='56%25' dominant-baseline='middle' text-anchor='middle' font-family='monospace' font-weight='700' font-size='26' fill='%230e0d0b'%3EKM%3C/text%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..800&family=Geist:wght@300..700&family=Geist+Mono:wght@400..600&family=Newsreader:ital,opsz,wght@1,6..72,400..500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="v5.css" />
+  <link rel="preload" as="image" href="mapa-niteroi.svg" />
+</head>
+<body>
+  <a class="skip" href="#quem">Pular para o conteúdo</a>
+
+  <header class="bar" id="bar">
+    <a class="bar-mark" href="#topo" data-go="topo" aria-label="Kluivert Mury, início"><span>KM</span><b>Kluivert Mury</b></a>
+    <div class="bar-chapter" aria-hidden="true"><span id="chap-n">00</span><span id="chap-t">Abertura</span></div>
+    <div class="bar-end">
+      <span class="bar-clock" id="clock" aria-label="Hora em Niterói">--:--</span>
+      <a class="pill pill-ink" href="mailto:kluivert.mury@gmail.com">Fale comigo</a>
+    </div>
+    <i class="bar-progress" id="progress" aria-hidden="true"></i>
+  </header>
+
+  <main>
+    <!-- 00 · abertura: a cidade agora -->
+    <section class="ch hero" id="topo" data-chap="00" data-title="Abertura" aria-labelledby="hero-name">
+      <div class="hero-stage">
+        <div class="hero-map" id="heroMap" aria-hidden="true">
+          <img src="mapa-niteroi.svg" alt="" width="2000" height="1225" decoding="async" />
+          <svg class="hero-st" id="heroSt" viewBox="0 0 2000 1225" aria-hidden="true"></svg>
+        </div>
+        <div class="hero-shade" aria-hidden="true"></div>
+        <div class="hero-copy">
+          <p class="eyebrow hero-live" id="heroLive"><i></i><span>ao vivo · lendo as estações do NitBike…</span></p>
+          <h1 class="hero-name" id="hero-name"><span class="ln"><span>Kluivert</span></span><span class="ln"><span>Mury</span></span></h1>
+          <div class="hero-foot">
+            <p class="hero-lead">Desenvolvo em Python e levo os dados da cidade <em>para o mapa</em>. Cada ponto aqui é uma estação do NitBike, lida agora na camada pública que eu ajudo a alimentar.</p>
+            <div class="hero-act">
+              <a class="pill pill-accent" href="#caminho" data-go="caminho">Seguir o dado <span aria-hidden="true">↓</span></a>
+              <a class="pill pill-line" href="#projetos" data-go="projetos">Projetos</a>
+            </div>
+          </div>
+        </div>
+        <div class="hero-tip" id="heroTip" role="status" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <!-- 01 · quem -->
+    <section class="ch who" id="quem" data-chap="01" data-title="Quem" aria-labelledby="who-t">
+      <div class="who-pin">
+        <div class="wrap who-grid">
+          <div>
+            <p class="eyebrow">01 — Quem</p>
+            <h2 class="who-say" id="who-t">Sou desenvolvedor Python. Pego dados soltos da cidade e entrego camadas prontas para quem decide. Do banco à API, dos testes ao deploy em Linux.</h2>
+          </div>
+          <dl class="who-card" id="whoFacts"></dl>
+        </div>
+        <div class="wrap who-stats" id="whoStats"></div>
+      </div>
+    </section>
+
+    <!-- 02 + 03 · a viagem do dado: da API às camadas do Gêmeo, numa cena só -->
+    <section class="ch trip" id="caminho" data-chap="02" data-title="O caminho do dado" aria-labelledby="trip-t">
+      <div class="wrap trip-intro">
+        <p class="eyebrow">02 — O caminho do dado</p>
+        <h2 class="rise" id="trip-t"><span class="ln"><span>65 estações.</span></span> <span class="ln"><span><em>Um minuto até o mapa.</em></span></span></h2>
+        <p class="lead">Siga o dado do NitBike da API até o Gêmeo Digital. Cada ponto da cena é uma estação de verdade; a cada etapa, eles mudam de forma.</p>
+      </div>
+      <div class="trip-run" id="tripRun">
+        <i class="trip-mark" id="camadas" aria-hidden="true"></i>
+        <div class="trip-stage" id="tripStage">
+          <canvas id="tripGL" aria-hidden="true"></canvas>
+          <div class="trip-shade" aria-hidden="true"></div>
+          <div class="trip-caps" id="tripCaps"></div>
+          <div class="trip-tags" id="tripTags" aria-hidden="true"></div>
+          <nav class="trip-rail" id="tripRail" aria-label="Etapas do caminho do dado"></nav>
+        </div>
+      </div>
+    </section>
+
+    <!-- 04 · laboratório -->
+    <section class="ch lab" id="lab" data-chap="04" data-title="Laboratório" aria-labelledby="lab-t">
+      <div class="wrap">
+        <p class="eyebrow">04 — Laboratório</p>
+        <div class="lab-head">
+          <h2 id="lab-t">Mexa no <em>Gêmeo simplificado</em></h2>
+          <p class="lead">A cidade lida neste minuto e o pipeline do NitBike rodando: um snapshot a cada 10 s, uma publicação por minuto, o pico da madrugada. Os ônibus e o acidente são simulados; o resto vem das camadas públicas.</p>
+        </div>
+        <div class="lab-frame" id="labFrame"><p class="lab-wait">O laboratório carrega quando você chega perto.</p></div>
+      </div>
+    </section>
+
+    <!-- 05 · outras frentes -->
+    <section class="ch civic" data-chap="05" data-title="Outras frentes" aria-label="Colab e prova de conceito de trânsito">
+      <div class="wrap" id="civic"></div>
+    </section>
+
+    <!-- 06 · partidas -->
+    <section class="ch board" id="trajetoria" data-chap="06" data-title="Trajetória" aria-labelledby="board-t">
+      <div class="wrap">
+        <p class="eyebrow">06 — Trajetória</p>
+        <h2 id="board-t">Painel de <em>partidas</em></h2>
+        <div class="flap" id="flap" role="table" aria-label="Experiência e formação"></div>
+        <div class="lines-head"><h3>As linhas em operação</h3><p>Cada frente de trabalho é uma linha. Toque para ver o trajeto.</p></div>
+        <ul class="lines" id="lines"></ul>
+      </div>
+    </section>
+
+    <!-- 07 · projetos -->
+    <section class="ch pjs" id="projetos" data-chap="07" data-title="Projetos" aria-labelledby="deck-t">
+      <div class="wrap pjs-head">
+        <p class="eyebrow">07 — Projetos</p>
+        <h2 class="rise" id="deck-t"><span class="ln"><span>Coisas que eu</span></span> <span class="ln"><span><em>construí</em></span></span></h2>
+      </div>
+      <div id="pjList"></div>
+    </section>
+
+    <!-- 08 · ferramentas -->
+    <section class="ch tools" id="ferramentas" data-chap="08" data-title="Ferramentas" aria-labelledby="tools-t">
+      <div class="wrap">
+        <p class="eyebrow">08 — Ferramentas</p>
+        <h2 id="tools-t">Onde cada ferramenta <em>trabalhou</em></h2>
+        <p class="lead">Passe o mouse (ou toque) num trabalho para ver o que ele usa, ou numa ferramenta para ver onde ela aparece.</p>
+        <div class="graph" id="graph"></div>
+      </div>
+    </section>
+
+    <!-- 09 · ponto final -->
+    <section class="ch end" id="contato" data-chap="09" data-title="Ponto final" aria-labelledby="end-t">
+      <div class="wrap">
+        <p class="eyebrow">09 — Ponto final</p>
+        <h2 class="end-big rise" id="end-t"><span class="ln"><span>Vamos</span></span> <span class="ln"><span><em>conversar?</em></span></span></h2>
+        <div class="end-grid">
+          <p class="lead">Tenho interesse em oportunidades e projetos de backend, engenharia de dados e tecnologia para o setor público. O contato mais rápido é por e-mail.</p>
+          <div>
+            <a class="end-mail" href="mailto:kluivert.mury@gmail.com">kluivert.mury@gmail.com <span aria-hidden="true">↗</span></a>
+            <div class="end-links">
+              <button type="button" class="pill pill-line" id="copyMail">Copiar e-mail</button>
+              <a class="pill pill-line" href="https://www.linkedin.com/in/kluivertmury" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+              <a class="pill pill-line" href="https://github.com/Kluiv-Mury" target="_blank" rel="noopener noreferrer">GitHub</a>
+              <a class="pill pill-line" href="cv.pdf" target="_blank" rel="noopener noreferrer">Currículo</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="wrap foot-row">
+      <span>© <span id="year">2026</span> Kluivert Mury · São Gonçalo, RJ</span>
+      <span>Estações: camada pública da Prefeitura de Niterói · Mapa: © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">colaboradores do OpenStreetMap</a></span>
+    </div>
+  </footer>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.13.0/gsap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.13.0/ScrollTrigger.min.js"></script>
+  <script src="https://unpkg.com/lenis@1.1.13/dist/lenis.min.js"></script>
+  <script src="data.js"></script>
+  <script src="geo.js"></script>
+  <script src="v5.js"></script>
+</body>
+</html>
+
