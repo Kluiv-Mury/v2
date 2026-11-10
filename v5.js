@@ -317,7 +317,7 @@
       if (live.length >= 12) return setJams(live, "agora");
       return fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, `retrato · ${new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date(s.retrato))}`));
     }).catch(() => fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, "retrato")).catch(() => {}));
-    import("./scene.js?v=202611101420").then(m => {
+    import("./scene.js?v=202611101438").then(m => {
       trip = m.createTrip({ canvas: $("#tripGL"), stations: [...stations.values()], term, geo: window.KMGEO || { cams: [], gauges: [], routes: [] }, layers: lay, mapSrc: "mapa-niteroi.svg", tagEls: tripTags, onFocus: userLayer });
       trip.setBikes(); if (wazePts) trip.setWaze(wazePts); if (jams) paintJams();
       tripTo(tripP);
@@ -364,7 +364,7 @@
   const loadLab = () => {
     if (labOn) return; labOn = true;
     const f = document.createElement("iframe");
-    f.src = "lab.html?v=202611101420"; f.title = "Gêmeo simplificado e pipeline do NitBike";
+    f.src = "lab.html?v=202611101438"; f.title = "Gêmeo simplificado e pipeline do NitBike";
     labFrame.innerHTML = ""; labFrame.appendChild(f);
   };
   addEventListener("load", () => setTimeout(() => idle(loadLab, { timeout: 4000 }), 3200));
@@ -641,7 +641,7 @@
   // o contorno, o equador, o núcleo (onde as linhas são sugadas) e o halo da bola de luz
   sph.insertAdjacentHTML("afterbegin", `<b class="s-halo"></b><b class="s-rim"></b><b class="s-eq"></b><b class="s-core"></b>`);
   const sRim = $(".s-rim", sph), sEq = $(".s-eq", sph), sCore = $(".s-core", sph), sHalo = $(".s-halo", sph);
-  let sFrom = null, sM = 0, sT = 0, sL = 0, sLT = 0, sAng = 0, sRaf = 0, sLast = 0, sR = 200, sC = [0, 0];
+  let sDim = [], sFrom = null, sM = 0, sT = 0, sL = 0, sLT = 0, sAng = 0, sRaf = 0, sLast = 0, sR = 200, sC = [0, 0];
   const sMeasure = () => {
     const g = graph.getBoundingClientRect(), sc = g.width / graph.offsetWidth || 1;
     sR = wide() ? Math.min(graph.offsetWidth * 0.36, graph.offsetHeight * 0.4) : Math.min(graph.offsetWidth * 0.36, graph.offsetHeight * 0.42);
@@ -649,12 +649,18 @@
     sHalo.style.width = sHalo.style.height = `${(sR * 3.4).toFixed(0)}px`;
     // posição de partida: o centro de cada botão, medido a partir da origem da esfera (e não do centro do grafo)
     const o = sph.getBoundingClientRect(), sv = gsvg.getBoundingClientRect();
+    // o que estava aceso quando o globo começou: essas ligações já estão inteiras; as outras nascem do zero
+    gLinks.forEach(L => { L.on0 = L.p.classList.contains("on"); });
+    sDim = sBtns.map(b => parseFloat(getComputedStyle(b).opacity) || 1);
+    // as pílulas acesas (laranja) continuam laranja na cópia e perdem a cor junto com a pílula, sem salto
+    sBtns.forEach((b, i) => sEls[i].classList.toggle("on0", b.classList.contains("on")));
     sFrom = sBtns.map((b, i) => { const r = b.getBoundingClientRect(); sEls[i].style.width = `${b.offsetWidth}px`; return [(r.left + r.width / 2 - o.left) / sc, (r.top + r.height / 2 - o.top) / sc]; });
     // o centro da esfera no sistema de coordenadas das linhas
     const vb = gsvg.viewBox.baseVal, kx = vb && vb.width ? vb.width / sv.width : 1, ky = vb && vb.height ? vb.height / sv.height : 1;
     sC = [(o.left - sv.left) * kx, (o.top - sv.top) * ky];
   };
   const ease = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  const soft = t => 0.5 - 0.5 * Math.cos(Math.PI * t);   // seno: a mais macia das curvas de entrada e saída
   const cl = v => Math.min(1, Math.max(0, v));
   const lerp = (a, b, t) => a + (b - a) * t;
   // as linhas caem no núcleo e viram filamentos orbitando dentro dele.
@@ -727,7 +733,7 @@
     return d;
   };
   const sstep = t => t * t * t * (t * (t * 6 - 15) + 10);   // smootherstep: começa e termina sem tranco
-  const pullLines = (m, time) => {
+  const pullLines = (m, time, dt = 0.016) => {
     // sem medida válida (grafo ainda sem tamanho, um quadro de redesenho), não desenha nada errado
     if (!isFinite(sC[0]) || !isFinite(sC[1]) || !sR) return;
     lineSetup();
@@ -757,7 +763,7 @@
         const w = sstep(cl((m - start - along * 0.04) / 0.4));
         wSum += w;
         const rot = o.tilt + o.offR + 0.95 * (1 - w), cr = Math.cos(rot), sr = Math.sin(rot);
-        const pa = o.ph + o.arcDir * o.span * (i / (LP - 1)) + time * L.spin;
+        const pa = o.ph + o.arcDir * o.span * (i / (LP - 1)) + (L.ps || 0);
         const ex = Math.cos(pa) * o.rk, ey = Math.sin(pa) * o.rk * o.squash;
         const tx = cx0 + ex * cr - ey * sr, ty = cy0 + ex * sr + ey * cr;
         const sx = L.ox[i] + (L.qx[i] - L.ox[i]) * pinch, sy = L.oy[i] + (L.qy[i] - L.oy[i]) * pinch;
@@ -768,10 +774,23 @@
       L.p.setAttribute("d", smooth(pts));
       // rastro: enquanto cai, a linha perde o pedaço de trás (fica só a cabeça que entra primeiro); já no
       // núcleo, o trecho aceso corre pela órbita, como energia circulando
-      const vis = 1 - 0.5 * em, flow = time * 0.07 * ss(0.7, 1, em) + L.k * 0.6;
-      const head = L.lead > 0 ? 0 : -(1 - vis);
-      L.p.style.strokeDasharray = `${vis.toFixed(4)} ${(1.0001 - vis + 0.0001).toFixed(4)}`;
-      L.p.style.strokeDashoffset = (head - flow * ss(0.7, 1, em)).toFixed(4);
+      // o fluxo é uma fase própria de cada linha, que só anda depois que ela chegou (e na velocidade
+      // certa): antes ele usava o relógio da página, e a luz dava várias voltas de uma vez ao ligar
+      L.fl = (L.fl || 0) + dt * 0.07 * ss(0.7, 1, em);
+      // o anel também só começa a girar quando a linha já está chegando nele: assim o destino continua
+      // alinhado com a linha durante a entrada, por mais tempo que a página esteja aberta
+      L.ps = (L.ps || 0) + dt * L.spin * ss(0.55, 1, em);
+      if (em < 0.01) L.ps = L.fl = 0;   // voltou para o grafo: a próxima entrada começa alinhada de novo
+      // trecho visível [a, b] da linha (0 = ponta do trabalho, 1 = ponta da ferramenta). As ligações que
+      // estavam apagadas nascem do trabalho: b cresce de 0 até 1 enquanto elas já se apertam e seguem
+      // para a órbita. Perto do fim, o rastro deixa só a cabeça que entra primeiro
+      const grow = L.on0 ? 1 : sstep(cl((m - L.k * 0.1) / 0.24));
+      const vis = 1 - 0.5 * em;
+      let a = L.lead > 0 ? 0 : 1 - vis, b = L.lead > 0 ? vis : 1;
+      b = Math.min(b, grow); if (b < a) b = a;
+      const len = Math.max(0.0001, b - a);
+      L.p.style.strokeDasharray = `${len.toFixed(4)} ${(1.0002 - len).toFixed(4)}`;
+      L.p.style.strokeDashoffset = (-a - (L.fl % 1)).toFixed(4);
       L.p.style.strokeWidth = (1.3 - 0.45 * em).toFixed(2);
       L.p.style.opacity = "1";
     });
@@ -786,10 +805,15 @@
     graph.classList.toggle("morph", sM > 0);
     if (sM <= 0 && sT <= 0) {
       cancelAnimationFrame(sRaf); sRaf = 0; sFrom = null;
-      if (was) { gLinks.forEach(({ p }) => { p.style.opacity = p.style.stroke = p.style.strokeWidth = p.style.strokeDasharray = p.style.strokeDashoffset = ""; }); lineKey = ""; gCoreEl = null; drawGraph(); }
+      if (was) {
+        gLinks.forEach(({ p }) => { p.style.opacity = p.style.stroke = p.style.strokeWidth = p.style.strokeDasharray = p.style.strokeDashoffset = ""; });
+        lineKey = ""; gCoreEl = null; drawGraph();
+        // de volta ao grafo: entra o destaque que a rolagem pede agora (o último trabalho, se for o caso)
+        focusGraph("w", toolsAt >= 0 ? D.works[toolsAt].id : null);
+      }
       return false;
     }
-    pullLines(sM, now / 1000);
+    pullLines(sM, now / 1000, dt);
     // giro: devagar na esfera; na bola de luz cada rolada acelera, até virar um borrão
     // giro: devagar na esfera; rolando mais, a órbita dos nomes acelera (a esfera não cresce nem some)
     sAng += dt * (0.32 * ss(0.25, 0.6, sM) + 3.4 * Math.pow(sL, 1.4));
@@ -798,9 +822,11 @@
     // três tempos: os nomes entram numa órbita (o equador da esfera, já girando); a órbita se abre e vira
     // a esfera; e, rolando mais, a esfera gira cada vez mais rápido e se fecha numa bola de luz
     for (let i = 0; i < NS_; i++) {
-      const d = i / NS_ * 0.06;
-      const e1 = ease(cl((sM - 0.14 - d) / 0.42));   // os nomes saem enquanto o aperto se completa
-      const e2 = ease(cl((sM - 0.6 - d) / 0.34));
+      // cada nome sai num tempo um pouco diferente (ordem embaralhada, não de cima para baixo) e a viagem é
+      // longa, com uma curva de seno: começa e termina devagar, sem o pico de velocidade no meio
+      const d = (((i * 7) % NS_) / NS_) * 0.16;
+      const e1 = soft(cl((sM - 0.12 - d) / 0.5));
+      const e2 = soft(cl((sM - 0.6 - d * 0.5) / 0.32));
       // na órbita a ordem também salta de 11 em 11, para os trabalhos (laranja) ficarem espalhados no anel
       const th = ((i * 11) % NS_) / NS_ * Math.PI * 2, [sx0, sy0, sz0] = sDir[i];
       const dx = Math.cos(th) + (sx0 - Math.cos(th)) * e2, dy = sy0 * e2, dz = Math.sin(th) + (sz0 - Math.sin(th)) * e2;
@@ -814,7 +840,8 @@
       const px = (sFrom[i][0] + (x * rr - sFrom[i][0]) * e1) * k, py = (sFrom[i][1] + (y2 * rr - sFrom[i][1]) * e1) * k;
       const sc2 = 1 + (k - 1) * e1;
       sEls[i].style.transform = `translate3d(${px.toFixed(1)}px, ${py.toFixed(1)}px, 0) translate(-50%, -50%) scale(${sc2.toFixed(3)})`;
-      sEls[i].style.opacity = ((1 - e1 * (0.62 - 0.62 * (z2 + 1) / 2)) * fade).toFixed(3);
+      const dim0 = sDim[i] == null ? 1 : sDim[i];
+      sEls[i].style.opacity = ((1 - e1 * (0.62 - 0.62 * (z2 + 1) / 2)) * fade * (dim0 + (1 - dim0) * ss(0, 0.5, e1))).toFixed(3);
       sPill[i].style.opacity = sNum[i].style.opacity = (1 - e1).toFixed(3);
       sEls[i].classList.toggle("lit", e1 > 0.5);
     }
@@ -842,16 +869,19 @@
     if (attr !== "w" || !toolsST || !toolsST.isActive) return;
     const k = D.works.findIndex(w => w.id === val), n = D.works.length;
     if (k < 0 || k === toolsAt) return;
-    toolsAt = k; jumpTo(toolsST.start + (toolsST.end - toolsST.start) * (0.03 + (k + 0.5) / n * 0.3));
+    toolsAt = k; jumpTo(toolsST.start + (toolsST.end - toolsST.start) * (0.03 + (k + 0.5) / n * 0.21));
   }
   const toolsTo = p => {
     // primeiro a rolagem passa por cada trabalho, de cima para baixo; depois os nomes viram a esfera
-    // 0,03–0,33 passeio pelos trabalhos · 0,34–0,58 linhas e globo · 0,60–0,80 bola de luz · 0,81–1 contato por cima
-    const t = (p - 0.03) / 0.3, n = D.works.length;
-    const k = t < 0 || t >= 1 || !graph.classList.contains("ready") ? -1 : Math.floor(t * n);
-    if (k !== toolsAt) { toolsAt = k; focusGraph("w", k < 0 ? null : D.works[k].id); }
-    // a esfera se forma e fica parada no lugar; a última tela da seção é o contato subindo por cima dela
-    sphereTo(Math.min(1, Math.max(0, (p - 0.34) / 0.26)), Math.min(1, Math.max(0, (p - 0.62) / 0.18)));
+    // seção presa por 7 telas: 0,03–0,24 passeio pelos trabalhos · 0,24–0,62 ligações e globo (a parte mais
+    // longa) · 0,64–0,84 a órbita acelera · 0,857–1 contato por cima. O último trabalho fica destacado até
+    // o globo começar
+    const t = (p - 0.03) / 0.21, n = D.works.length;
+    const k = t < 0 || !graph.classList.contains("ready") ? -1 : Math.min(n - 1, Math.floor(t * n));
+    // durante o globo o destaque não é aplicado (as linhas estão sendo desenhadas por ele); fica guardado
+    // e entra quando o grafo se refaz, na volta
+    if (k !== toolsAt) { toolsAt = k; if (!sRaf && sM <= 0) focusGraph("w", k < 0 ? null : D.works[k].id); }
+    sphereTo(Math.min(1, Math.max(0, (p - 0.24) / 0.38)), Math.min(1, Math.max(0, (p - 0.64) / 0.2)));
   };
 
   /* ---------- 08 · contato ---------- */
@@ -892,8 +922,8 @@
   // 08: o grafo fica grudado; a rolagem passeia pelos trabalhos e termina na esfera
   graphFit(); addEventListener("resize", () => { graphFit(); sFrom = null; if (sM > 0) sMeasure(); });
   document.fonts && document.fonts.ready.then(graphFit);
-  // preso de verdade (fixed) por 5,2 telas: a última delas é o contato subindo por cima da bola de luz
-  toolsST = ScrollTrigger.create({ trigger: ".tools-pin", start: "top top", end: "+=520%", pin: true, pinSpacing: true, anticipatePin: 1, onUpdate: s => toolsTo(s.progress) });
+  // preso de verdade (fixed) por 7 telas: a última delas é o contato subindo por cima do globo
+  toolsST = ScrollTrigger.create({ trigger: ".tools-pin", start: "top top", end: "+=700%", pin: true, pinSpacing: true, anticipatePin: 1, onUpdate: s => toolsTo(s.progress) });
 
   const mm = gsap.matchMedia();
   mm.add({ wide: "(min-width: 861px)", narrow: "(max-width: 860px)" }, ctx => {

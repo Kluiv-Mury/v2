@@ -461,6 +461,8 @@ p { margin: 0; }
 .sphere b { font-weight: inherit; transition: color .4s ease; }
 .sphere small { margin-left: auto; color: var(--mute); font: .7rem var(--f-mono); }
 .sphere .sw.lit b { color: var(--orange); }
+.sphere .on0 em { background: var(--orange); border-color: var(--orange); }
+.sphere .on0:not(.lit) b, .sphere .on0 small { color: var(--ink); }
 .sphere em { position: absolute; inset: 0; z-index: -1; border-radius: 999px; border: 1px solid var(--line); background: var(--ink-2); }
 .graph.morph .g-col button { opacity: 0 !important; pointer-events: none; transition: none !important; }
 .graph.morph .g-say { opacity: 0; transition: opacity .25s ease; }
