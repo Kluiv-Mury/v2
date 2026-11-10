@@ -10,6 +10,23 @@
   const fmt = n => n.toLocaleString("pt-BR");
   const hasGsap = !!(window.gsap && window.ScrollTrigger);
   if (hasGsap) gsap.registerPlugin(ScrollTrigger);
+  // indicadores de estado: os Thinking Orbs (cópia local, sem dependências) dizem o que cada parte está
+  // fazendo agora. Trocar de estado apaga o orb, troca e acende de novo, para não haver corte seco
+  const orbsLib = import("./orbs.js?v=202611101630").catch(() => null);
+  const orb = (svg, o) => {
+    let cur = null, gen = 0;
+    const set = (opts, hint) => {
+      const g = ++gen;
+      orbsLib.then(m => {
+        if (!m || g !== gen) return;
+        const swap = () => { if (g !== gen) return; if (cur) cur.destroy(); cur = m.mountOrb(svg, { size: 16, ...opts }); svg.classList.remove("swap"); svg.dataset.s = hint || ""; };
+        if (!cur) return swap();
+        svg.classList.add("swap"); setTimeout(swap, 180);
+      });
+    };
+    set(o);
+    return { set };
+  };
 
   /* ---------- rolagem suave: Lenis no relógio do GSAP ---------- */
   let lenis = null;
@@ -83,6 +100,8 @@
   new IntersectionObserver(([e]) => svg.classList.toggle("still", !e.isIntersecting)).observe($(".hero"));
 
   const live = $("#heroLive span");
+  // procurando enquanto lê a camada do NitBike; parado e verde quando a leitura chega
+  const liveOrb = orb($("#heroLive .orb"), { state: "searching", label: "lendo as estações" });
   const LAYER = "https://services8.arcgis.com/TpaOLI1HCh5AcRQB/ArcGIS/rest/services/NGP_SEMOBI_NITBIKE_P_ESTACOES_DE_BICICLETA/FeatureServer/5/query?where=1%3D1&outFields=si_stationNumber,si_bikeAvailable,si_positionAvailable,dt_atualizado&returnGeometry=false&f=json";
   let lastRead = null;
   const readLive = () => fetch(LAYER, { cache: "no-store" }).then(r => r.json()).then(d => {
@@ -98,8 +117,9 @@
     lastRead = { bikes, n, at: newest ? new Date(newest) : new Date() };
     const at = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" }).format(lastRead.at);
     live.textContent = `ao vivo · ${fmt(bikes)} bikes paradas em ${n} estações · leitura das ${at}`;
+    liveOrb.set({ state: "idle", label: "ao vivo" }, "on");
     tripLive();
-  }).catch(() => { live.textContent = "camada pública fora do ar agora · mostrando as posições das estações"; });
+  }).catch(() => { live.textContent = "camada pública fora do ar agora · mostrando as posições das estações"; liveOrb.set({ state: "waiting", label: "camada fora do ar" }, "off"); });
   readLive(); setInterval(readLive, 60000);
 
   // câmera: no começo a rede inteira à direita do nome; ao rolar, desce até o Terminal (estação 4), no Centro
@@ -317,7 +337,7 @@
       if (live.length >= 12) return setJams(live, "agora");
       return fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, `retrato · ${new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date(s.retrato))}`));
     }).catch(() => fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, "retrato")).catch(() => {}));
-    import("./scene.js?v=202611101438").then(m => {
+    import("./scene.js?v=202611101630").then(m => {
       trip = m.createTrip({ canvas: $("#tripGL"), stations: [...stations.values()], term, geo: window.KMGEO || { cams: [], gauges: [], routes: [] }, layers: lay, mapSrc: "mapa-niteroi.svg", tagEls: tripTags, onFocus: userLayer });
       trip.setBikes(); if (wazePts) trip.setWaze(wazePts); if (jams) paintJams();
       tripTo(tripP);
@@ -361,11 +381,15 @@
   // então ele entra num momento ocioso logo depois da abertura, ou antes, se a pessoa chegar perto
   const labFrame = $("#labFrame");
   let labOn = false;
+  // o aviso fica por cima do quadro até ele terminar de carregar: em espera antes, trabalhando durante
+  const labWait = $(".lab-wait", labFrame), labOrb = orb($(".orb", labWait), { state: "waiting", size: 20 });
   const loadLab = () => {
     if (labOn) return; labOn = true;
     const f = document.createElement("iframe");
-    f.src = "lab.html?v=202611101438"; f.title = "Gêmeo simplificado e pipeline do NitBike";
-    labFrame.innerHTML = ""; labFrame.appendChild(f);
+    f.src = "lab.html?v=202611101630"; f.title = "Gêmeo simplificado e pipeline do NitBike";
+    labOrb.set({ state: "working", size: 20 }); $("span", labWait).textContent = "carregando o laboratório…";
+    f.addEventListener("load", () => { labWait.classList.add("gone"); setTimeout(() => labWait.remove(), 400); }, { once: true });
+    labFrame.insertBefore(f, labWait);
   };
   addEventListener("load", () => setTimeout(() => idle(loadLab, { timeout: 4000 }), 3200));
   const labIO = new IntersectionObserver(es => { if (es[0].isIntersecting) { labIO.disconnect(); loadLab(); } }, { rootMargin: "200% 0px" });
@@ -449,7 +473,7 @@
   const edital = ([t, uf, sal, vagas, ate, nivel]) => `<div class="tg"><div class="tg-b"><p class="tg-t">🔔 <b>${t}</b> <i>(${uf})</i></p><p>💵 <b>Salário máximo:</b> ${sal}</p><p>🏢 <b>Vagas:</b> ${vagas}</p><p>📅 <b>Inscrições até:</b> ${ate}</p><p>🎓 <b>Nível:</b> ${nivel}</p><p class="tg-l">🔗 link do edital</p></div><button type="button" class="tg-fav" aria-pressed="false">⭐ Favoritar</button></div>`;
   const demos = {
     concurso: `<span class="demo-note">exemplo · concursos fictícios</span><div class="d3 d3-phone"><i class="d3-floor"></i><div class="phone">
-        <div class="ph-top"><i></i><div><b>Concurso Notifier</b><small>bot · alertas a cada 17 min</small></div></div>
+        <div class="ph-top"><i></i><div><b>Concurso Notifier</b><small><svg class="orb" width="14" height="14" aria-hidden="true"></svg><span>bot · alertas a cada 17 min</span></small></div></div>
         <div class="chat"><div class="feed" id="tgFeed">${edital(EDITAIS[0])}</div></div></div>
       <span class="fchip c1">estado · RJ</span><span class="fchip c2">nível · superior</span><span class="fchip c3">palavra · dados</span></div>`,
     // mapa de ladrilhos do Brasil (coluna, linha): altura e cor são só ilustração, sem dado real
@@ -519,8 +543,15 @@
   const setFav = (b, on) => { b.classList.toggle("fav", on); b.setAttribute("aria-pressed", on); b.textContent = on ? "💔 Remover dos favoritos" : "⭐ Favoritar"; };
   tgFeed.addEventListener("click", e => { const b = e.target.closest(".tg-fav"); if (b) setFav(b, !b.classList.contains("fav")); });
   let tgI = 1;
+  // no cabeçalho, o bot procura editais antes de cada mensagem nova e volta a esperar quando ela chega
+  const tgSay = $(".ph-top small span", tgPj), tgOrb = orb($(".ph-top .orb", tgPj), { state: "idle", size: 14 });
   const tgNext = () => {
     if (!tgPj.classList.contains("live") || document.hidden) return;
+    tgOrb.set({ state: "searching", size: 14 }, "on"); tgSay.textContent = "procurando editais…";
+    setTimeout(tgPost, 1300);
+  };
+  const tgPost = () => {
+    tgOrb.set({ state: "idle", size: 14 }); tgSay.textContent = "bot · alertas a cada 17 min";
     tgFeed.insertAdjacentHTML("beforeend", edital(EDITAIS[tgI % EDITAIS.length]));
     const el = tgFeed.lastElementChild, n = tgI++;
     while (tgFeed.children.length > 4) tgFeed.firstElementChild.remove();
