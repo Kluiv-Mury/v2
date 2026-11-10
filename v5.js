@@ -147,6 +147,8 @@
   };
   const [uE, uN] = toUTM23S(term.lon, term.lat);
   const nf = (v, d = 2) => v.toLocaleString("pt-BR", { minimumFractionDigits: d, maximumFractionDigits: d });
+  const idle = window.requestIdleCallback || (fn => setTimeout(fn, 1));
+
   /* ---------- 02 + 03 · a viagem do dado: uma cena só, em WebGL ---------- */
   // os 65 pontos da cena são as estações: mudam de forma a cada etapa e terminam como uma das seis camadas do Gêmeo.
   // A rolagem só entrega um número (0 a 1); quem desenha é o scene.js, no próprio relógio.
@@ -156,15 +158,17 @@
     { t: "Feed", k: "API · a cada 10 s", h: `A cada 10 s, a API do NitBike <em>fala.</em>`,
       p: `A cada <strong>10 s</strong>, a API informa as bikes paradas e as vagas livres de cada uma das <strong>65 estações</strong>. Solto, isso é só uma fila de números.`,
       hud: `<pre class="code" id="feedArt"></pre>` },
-    { t: "Coleta", k: "Prefect · a cada 10 s", h: `Python que <em>não para.</em>`,
-      p: `Um fluxo em Python lê as 65 estações e grava um <strong>snapshot</strong> no PostgreSQL. O Prefect cuida do agendamento e não deixa duas coletas rodarem juntas.`,
-      hud: `<pre class="code"><span class="k">@flow</span>(name=<span class="s">"coleta_nitbike"</span>)
-<span class="k">def</span> <span class="n">coletar</span>():
-    estacoes = api.estacoes()  <span class="c"># 65</span>
-    snap = padronizar(estacoes)
-    banco.gravar(<span class="s">"snapshots"</span>, snap)
-
-<span class="c"># agenda: a cada 10 s</span></pre>` },
+    { t: "Coleta", k: "Python · a cada 10 s", h: `Os números entram <em>na roda.</em>`,
+      p: `A cada volta, o Python pega a fila solta de números e põe ordem: cada estação vira uma linha com o mesmo formato, <strong>bikes, vagas e a hora da leitura</strong>. O que chega torto é conferido antes de seguir. Volta após volta, a cidade inteira cabe num retrato de <strong>10 em 10 segundos</strong>.`,
+      hud: `<pre class="code"><span class="k">def</span> <span class="n">organizar</span>(estacoes):
+    agora = relogio()
+    <span class="k">return</span> [
+        {<span class="s">"estacao"</span>: e.numero,
+         <span class="s">"bikes"</span>: e.bikes,
+         <span class="s">"vagas"</span>: e.vagas,
+         <span class="s">"hora"</span>: agora}
+        <span class="k">for</span> e <span class="k">in</span> estacoes  <span class="c"># 65</span>
+    ]</pre>` },
     { t: "Banco", k: "PostgreSQL · janela de 5 min", h: `A janela de <em>5 minutos.</em>`,
       p: `A cada minuto, aos :30, a publicação lê a <strong>janela dos últimos 5 min</strong> (30 snapshots) e compara: subiu, entraram bikes; caiu, saíram. Os 30 s mais recentes ficam para a próxima. O que já saiu da janela é apagado.`,
       hud: `<div class="key"><span class="k-old">apagados</span><span class="k-win">na janela</span><span class="k-new">últimos 30 s</span></div>` },
@@ -178,7 +182,7 @@
       p: `O Gêmeo Digital de Niterói junta dados oficiais em tempo real para planejar e monitorar a cidade. Eu cuido do trânsito e do NitBike.`,
       hud: `<ol class="cap-layers">${lay.slice().reverse().map((l, i) => `<li class="${l.mine ? "mine" : ""}" data-layer="${LN - 1 - i}" tabindex="0"><b>${l.name}</b> ${l.source}</li>`).join("")}</ol>
         <a class="pill pill-line" href="https://gemeo.niteroi.rj.gov.br/" target="_blank" rel="noopener noreferrer">Abrir o Gêmeo Digital ↗</a>
-        <p class="cap-note">Pontos nas posições reais das camadas públicas, no recorte do Centro e de Icaraí. O trânsito é lido agora no Waze; os prédios são ilustrativos.</p>`, keep: true },
+        <p class="cap-note">Posições reais das camadas públicas, no recorte do Centro e de Icaraí. Trânsito e bikes lidos agora; prédios do OpenStreetMap, com a altura exagerada; a altura e as gotas da chuva são ilustrativas.</p>`, keep: true },
   ];
   $("#tripCaps").innerHTML = CAPS.map((c, i) => `<article class="cap" id="cap-${i}"><span class="cap-k"><b>0${i + 1}</b>/0${CAPS.length} · ${c.t}<i>${c.k}</i></span><h3>${c.h}</h3><p>${c.p}</p><div class="cap-hud${c.keep ? " keep" : ""}">${c.hud}</div></article>`).join("");
   $("#tripRail").innerHTML = CAPS.map((c, i) => `<button type="button" aria-label="Etapa ${i + 1}: ${c.t}"><i class="rl"><i></i></i><span>0${i + 1}</span><b>${c.t}</b></button>`).join("");
@@ -186,18 +190,22 @@
   const caps = $$(".cap", tripEl), railBtns = $$("#tripRail button"), railFills = $$("#tripRail .rl > i"), tripTags = $$(".trip-tag", tripEl);
   const iBike = lay.findIndex(l => l.name === "NitBike"), iWaze = lay.findIndex(l => l.name === "Trânsito");
 
-  const B = [0, 0.13, 0.27, 0.42, 0.56, 0.70, 1];
+  const B = [0, 0.11, 0.22, 0.34, 0.45, 0.56, 1];
   const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-  let layAt = -1;
+  let layAt = -1, sweepAt = -1;
   const layEls = $$("[data-layer]", tripEl);
   let trip = null, tripST = null, tripP = 0, capAt = -1, tripSeen = false, wazePts = null;
   const railW = railFills.map(() => -1);
   const tripTo = p => {
     tripP = p;
     let i = 0; while (i < 5 && p >= B[i + 1]) i++;
-    const st = i >= 5 ? 5 : i + ss(0.6, 1, (p - B[i]) / (B[i + 1] - B[i]));
-    if (trip) trip.set(st, ss(0.70, 0.88, p));
-    if (p < 0.8 && layAt >= 0) focusLayer(-1);
+    // o giro da etapa 05 para a 06 é mais longo: é nele que as colunas sobem e os prédios nascem
+    const st = i >= 5 ? 5 : i + ss(i === 4 ? 0.25 : 0.6, 1, (p - B[i]) / (B[i + 1] - B[i]));
+    if (trip) trip.set(st, ss(0.56, 0.68, p));
+    // no fim, a rolagem passa o destaque pelas camadas: descendo, de cima para baixo; subindo, ao contrário
+    const sw = (p - 0.71) / 0.26;
+    const want = sw < 0 ? -1 : LN - 1 - Math.min(LN - 1, Math.floor(sw * LN));
+    if (want !== sweepAt) { sweepAt = want; focusLayer(want); }
     const at = Math.round(st);
     if (at !== capAt) {
       capAt = at;
@@ -209,12 +217,12 @@
       if (w !== railW[j]) { railW[j] = w; f.style.transform = `scaleX(${w})`; }
     });
     // a barra de cima troca de capítulo quando as camadas se separam
-    const n = p >= 0.68 ? "03" : "02";
+    const n = p >= 0.55 ? "03" : "02";
     if (tripSeen && chapN.textContent !== n) { chapN.textContent = n; chapT.textContent = n === "03" ? "Camadas" : "O caminho do dado"; }
   };
   railBtns.forEach((b, i) => b.addEventListener("click", () => {
     if (!tripST) return;
-    const y = tripST.start + (tripST.end - tripST.start) * (i === 5 ? 0.9 : B[i] + 0.015);
+    const y = tripST.start + (tripST.end - tripST.start) * (i === 5 ? 0.7 : B[i] + 0.015);
     if (lenis) lenis.scrollTo(y, { duration: 1.1 }); else scrollTo({ top: y, behavior: "smooth" });
   }));
   tripTo(0);
@@ -252,12 +260,29 @@
       tripTags[iBike].querySelector("em").textContent = `${fmt(lastRead.bikes)} bikes agora`;
     }
     if (trip) trip.setBikes();
+    tkFill();
+  }
+  // a faixa entre o laboratório e as outras frentes repete o que as camadas públicas dizem agora
+  function tkFill() {
+    const at = lastRead ? new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" }).format(lastRead.at) : null;
+    const items = [
+      `<b>Niterói agora</b>`,
+      lastRead ? `NitBike <i>${fmt(lastRead.bikes)}</i> bikes paradas em ${lastRead.n} estações` : `NitBike <i>65</i> estações na camada pública`,
+      wazePts ? `Waze <i>${wazePts.length}</i> alertas de trânsito` : `Waze alertas a cada <i>2 min</i>`,
+      at ? `leitura das <i>${at}</i>` : `leitura a cada <i>1 min</i>`,
+      `Gêmeo Digital <i>6</i> camadas, <i>2</i> minhas`,
+    ].map(t => `<span>${t}</span>`).join("");
+    $("#tkA").innerHTML = items; $("#tkB").innerHTML = items;
   }
   tripLive();
 
   // a cena e os alertas do Waze só são buscados quando a viagem chega perto da tela
   const WAZE = "https://services8.arcgis.com/TpaOLI1HCh5AcRQB/ArcGIS/rest/services/WAZE_Alertas_LIVE/FeatureServer/0/query?where=1%3D1&outFields=db_lat,db_long&returnGeometry=false&f=json";
-  let tripVisible = false;
+  let tripVisible = false, jams = null;
+  const paintJams = () => {
+    const n = trip.setJams(jams.list);
+    tripTags[iWaze].querySelector("em").textContent = `${n} trechos ${jams.label}`;
+  };
   const tripFlat = () => { tripEl.classList.add("flat"); if (hasGsap) ScrollTrigger.refresh(); };
   const loadTrip = () => {
     fetch(WAZE).then(r => r.json()).then(d => {
@@ -265,11 +290,21 @@
       if (!pts.length) return;
       wazePts = pts;
       tripTags[iWaze].querySelector("em").textContent = `${pts.length} alertas agora`;
+      tkFill();
       if (trip) trip.setWaze(pts);
     }).catch(() => {});
+    // trechos de trânsito: ao vivo; de madrugada quase não há fila, então entra o retrato de um dia útil
+    const JAMS = "https://services8.arcgis.com/TpaOLI1HCh5AcRQB/ArcGIS/rest/services/WAZE_Tr%C3%A1fego_LIVE/FeatureServer/0/query?where=1%3D1&outFields=li_nivel&returnGeometry=true&outSR=4326&f=json";
+    const fromLive = d => (d.features || []).map(f => ({ n: f.attributes.li_nivel || 1, g: ((f.geometry && f.geometry.paths) || [])[0] || [] })).map(t => ({ n: t.n, g: t.g.map(([lon, lat]) => toMap(lon, lat)) })).filter(t => t.g.length > 1);
+    const setJams = (list, label) => { jams = { list, label }; if (trip) paintJams(); };
+    fetch(JAMS).then(r => r.json()).then(d => {
+      const live = fromLive(d);
+      if (live.length >= 12) return setJams(live, "agora");
+      return fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, `retrato · ${new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date(s.retrato))}`));
+    }).catch(() => fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, "retrato")).catch(() => {}));
     import("./scene.js").then(m => {
       trip = m.createTrip({ canvas: $("#tripGL"), stations: [...stations.values()], term, geo: window.KMGEO || { cams: [], gauges: [], routes: [] }, layers: lay, mapSrc: "mapa-niteroi.svg", tagEls: tripTags, onFocus: focusLayer });
-      trip.setBikes(); if (wazePts) trip.setWaze(wazePts);
+      trip.setBikes(); if (wazePts) trip.setWaze(wazePts); if (jams) paintJams();
       tripTo(tripP);
       if (tripVisible) trip.start();
       addEventListener("resize", () => trip.resize());
@@ -277,8 +312,13 @@
     }).catch(tripFlat);
   };
   if (hasGsap && !reduce) {
-    const nearIO = new IntersectionObserver(([e]) => { if (e.isIntersecting) { nearIO.disconnect(); loadTrip(); } }, { rootMargin: "150% 0px" });
+    // montar a cena (shaders, geometria, texturas) trava o navegador por alguns décimos de segundo:
+    // isso acontece num momento ocioso logo depois da abertura, e não no meio da rolagem
+    let tripAsked = false;
+    const askTrip = () => { if (tripAsked) return; tripAsked = true; nearIO.disconnect(); loadTrip(); };
+    const nearIO = new IntersectionObserver(([e]) => { if (e.isIntersecting) askTrip(); }, { rootMargin: "150% 0px" });
     nearIO.observe(tripEl);
+    addEventListener("load", () => setTimeout(() => idle(askTrip, { timeout: 2500 }), 600));
     new IntersectionObserver(([e]) => { tripVisible = tripSeen = e.isIntersecting; if (trip) trip[tripVisible ? "start" : "stop"](); }).observe(tripStage);
   }
 
@@ -297,6 +337,7 @@
     <div class="poc"><div class="poc-head"><div><p class="eyebrow">Prova de conceito · em andamento</p><h3>Prever o trânsito <em>antes de ele travar</em></h3></div><p class="lead">${D.poc.pitch}</p></div>
       <ol class="poc-line">${D.poc.steps.map((s, i) => `<li><small>0${i + 1}</small><b>${s}</b><span>a fazer</span></li>`).join("")}</ol></div>`;
   // cada bloco entra uma vez, quando chega à tela
+  new IntersectionObserver(([e]) => $("#ticker").classList.toggle("live", e.isIntersecting)).observe($("#ticker"));
   const onceIO = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { onceIO.unobserve(e.target); e.target.classList.add("on"); } }), { threshold: 0.3 });
   $$("#civic .civ-top, #sky, #civic .poc-line").forEach(el => onceIO.observe(el));
 
@@ -311,8 +352,7 @@
     f.src = "lab.html"; f.title = "Gêmeo simplificado e pipeline do NitBike";
     labFrame.innerHTML = ""; labFrame.appendChild(f);
   };
-  const idle = window.requestIdleCallback || (fn => setTimeout(fn, 1));
-  addEventListener("load", () => setTimeout(() => idle(loadLab, { timeout: 4000 }), 1800));
+  addEventListener("load", () => setTimeout(() => idle(loadLab, { timeout: 4000 }), 3200));
   const labIO = new IntersectionObserver(es => { if (es[0].isIntersecting) { labIO.disconnect(); loadLab(); } }, { rootMargin: "200% 0px" });
   labIO.observe(labFrame);
   // o quadro é do mesmo site, então o navegador não o pausa sozinho: longe da tela, ele para de animar
@@ -339,14 +379,16 @@
     D.departures.map(d => `<div class="flap-row" role="row"><span class="flap-cells" role="cell" aria-label="${d.when}">${cells(d.when, W.when)}</span><span class="flap-cells" role="cell" aria-label="${d.to}">${cells(d.to, W.to)}</span><span class="flap-cells" role="cell" aria-label="${d.what}">${cells(d.what, W.what)}</span><span class="flap-cells st${d.status === "CONCLUÍDO" ? " done" : ""}" role="cell" aria-label="${d.status}">${cells(d.status, W.status)}</span></div>`).join("");
   $$(".cell", flap).forEach(c => c.setAttribute("aria-hidden", "true"));
   const GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789·";
+  const FLIP = [{ transform: "scaleY(1)" }, { transform: "scaleY(.15)" }, { transform: "scaleY(1)" }];
   const runFlap = () => {
     $$(".flap-row:not(.head)", flap).forEach((row, r) => $$(".cell", row).forEach((c, i) => {
       const target = c.dataset.c, turns = reduce ? 0 : 4 + ((i * 7 + r * 3) % 9);
       let n = 0;
       const step = () => {
-        if (n >= turns) { c.innerHTML = target; c.classList.remove("flip"); return; }
+        if (n >= turns) { c.innerHTML = target; return; }
         c.textContent = GLYPHS[(i * 5 + n * 11 + r) % GLYPHS.length];
-        c.classList.remove("flip"); void c.offsetWidth; c.classList.add("flip");
+        // cada virada é uma animação nova da Web Animations: sem reiniciar classe, sem forçar layout a cada letra
+        c.animate(FLIP, 90);
         n++; setTimeout(step, 70);
       };
       setTimeout(step, reduce ? 0 : r * 160 + i * 18);
@@ -424,9 +466,8 @@
     while (tgFeed.children.length > 4) tgFeed.firstElementChild.remove();
     // a conversa já está na posição final; ela começa deslocada pela altura da mensagem nova e desliza até lá
     const dy = el.offsetHeight + 10;
-    tgFeed.style.transition = "none"; tgFeed.style.transform = `translate3d(0, ${dy}px, 0)`;
-    el.classList.add("in");
-    requestAnimationFrame(() => requestAnimationFrame(() => { tgFeed.style.transition = ""; tgFeed.style.transform = ""; el.classList.remove("in"); }));
+    tgFeed.animate([{ transform: `translate3d(0, ${dy}px, 0)` }, { transform: "translate3d(0, 0, 0)" }], { duration: 760, easing: "cubic-bezier(.16, 1, .3, 1)" });
+    el.animate([{ opacity: 0.35, transform: "translate3d(0, 10px, 0) scale(.98)" }, { opacity: 1, transform: "none" }], { duration: 520, easing: "cubic-bezier(.23, 1, .32, 1)" });
     if (n % 2 === 0) setTimeout(() => { const b = el.querySelector(".tg-fav"); if (b.isConnected) { b.classList.add("tap"); setFav(b, true); setTimeout(() => b.classList.remove("tap"), 220); } }, 1500);
   };
   if (!reduce) setInterval(tgNext, 3600);
@@ -468,7 +509,7 @@
     gSay.textContent = !val ? SAY0 : attr === "w" ? `${ws[0].label} → ${ws[0].tech.join(", ")}` : `${val} aparece em ${ws.length} ${ws.length === 1 ? "trabalho" : "trabalhos"}: ${ws.map(w => w.label).join(", ")}`;
   };
   // enquanto ninguém mexe, o grafo passa sozinho pelos trabalhos; o primeiro toque devolve o controle
-  let tour = null, tourI = 0, touched = false;
+  let tour = null, tourI = 0, touched = !!(hasGsap && !reduce);   // com rolagem animada quem passeia é a rolagem
   const stopTour = () => { clearInterval(tour); tour = null; };
   const hands = () => { if (touched) return; touched = true; stopTour(); };
   $$(".g-col button", graph).forEach(b => {
@@ -494,6 +535,70 @@
   }, { threshold: 0.25 }).observe(graph);
   document.fonts && document.fonts.ready.then(drawGraph);
 
+  // o grafo cabe sempre na altura da tela enquanto está grudado (o SVG acompanha a escala sozinho)
+  const graphFit = () => {
+    graph.style.transform = "";
+    const avail = innerHeight - 64 - 48, s = Math.min(1, avail / graph.offsetHeight);
+    graph.style.transform = s < 1 ? `scale(${s.toFixed(3)})` : "";
+  };
+
+  /* a esfera: no fim da seção cada nome sai do lugar dele no grafo e vira um ponto de uma esfera que gira */
+  const sph = h("div", "sphere"); sph.setAttribute("aria-hidden", "true");
+  const sBtns = $$(".g-col button", graph);
+  sph.innerHTML = sBtns.map(b => `<span class="${b.dataset.w ? "sw" : "st"}"><i></i>${b.firstChild.textContent}</span>`).join("");
+  graph.appendChild(sph);
+  const sEls = $$("span", sph), sPill = sEls.map(s => s.firstChild);
+  const NS_ = sEls.length, GA = Math.PI * (3 - Math.sqrt(5));
+  // pontos espalhados por igual (espiral de Fibonacci); os trabalhos ficam numa faixa, as ferramentas no resto
+  // a ordem salta de 11 em 11 para os trabalhos (laranja) não se juntarem num polo só
+  const sDir = sEls.map((_, i) => { const q = (i * 11) % NS_, y = 1 - (q + 0.5) / NS_ * 2, r = Math.sqrt(1 - y * y), a = q * GA; return [Math.cos(a) * r, y, Math.sin(a) * r]; });
+  // o contorno e o equador desenham a esfera mesmo onde não há nome
+  sph.insertAdjacentHTML("afterbegin", `<b class="s-rim"></b><b class="s-eq"></b>`);
+  const sRim = $(".s-rim", sph), sEq = $(".s-eq", sph);
+  let sFrom = null, sM = 0, sAng = 0, sRaf = 0, sLast = 0, sR = 200;
+  const sMeasure = () => {
+    const g = graph.getBoundingClientRect(), sc = g.width / graph.offsetWidth || 1;
+    sR = wide() ? Math.min(graph.offsetWidth * 0.36, graph.offsetHeight * 0.4) : Math.min(graph.offsetWidth * 0.36, graph.offsetHeight * 0.42);
+    [sRim, sEq].forEach(el => { el.style.width = el.style.height = `${(sR * 2).toFixed(0)}px`; });
+    sFrom = sBtns.map(b => { const r = b.getBoundingClientRect(); return [(r.left + r.width / 2 - g.left - g.width / 2) / sc, (r.top + r.height / 2 - g.top - g.height / 2) / sc]; });
+  };
+  const ease = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  const sDraw = now => {
+    const dt = sLast ? Math.min(0.05, (now - sLast) / 1000) : 0; sLast = now;
+    sAng += dt * 0.32 * ss(0.5, 1, sM);
+    const ca = Math.cos(sAng), sa = Math.sin(sAng), tx = 0.32, cx = Math.cos(tx), sx = Math.sin(tx);
+    for (let i = 0; i < NS_; i++) {
+      const e = ease(Math.min(1, Math.max(0, (sM - i / NS_ * 0.35) / 0.65)));
+      const [dx, dy, dz] = sDir[i];
+      let x = dx * ca + dz * sa, z = -dx * sa + dz * ca, y = dy;
+      const y2 = y * cx - z * sx, z2 = y * sx + z * cx;
+      const px = sFrom[i][0] + (x * sR - sFrom[i][0]) * e, py = sFrom[i][1] + (y2 * sR - sFrom[i][1]) * e, pz = z2 * sR * e;
+      const k = 1100 / (1100 - pz);
+      sEls[i].style.transform = `translate3d(${(px * k).toFixed(1)}px, ${(py * k).toFixed(1)}px, 0) translate(-50%, -50%) scale(${k.toFixed(3)})`;
+      sEls[i].style.opacity = (1 - e * (0.62 - 0.62 * (z2 + 1) / 2)).toFixed(3);
+      sPill[i].style.opacity = (1 - e).toFixed(3);
+    }
+    const o = ss(0.6, 1, sM).toFixed(3);
+    sRim.style.opacity = o; sEq.style.opacity = o;
+    sEq.style.transform = `translate(-50%, -50%) scaleY(.31) rotate(${(sAng * 57.3).toFixed(1)}deg)`;
+  };
+  const sLoop = now => { sDraw(now); sRaf = requestAnimationFrame(sLoop); };
+  const sphereTo = m => {
+    if (m > 0 && !sFrom) sMeasure();
+    sM = m;
+    graph.classList.toggle("morph", m > 0);
+    if (m > 0 && !sRaf) { sLast = 0; sRaf = requestAnimationFrame(sLoop); }
+    if (m <= 0 && sRaf) { cancelAnimationFrame(sRaf); sRaf = 0; sFrom = null; }
+  };
+  let toolsAt = -2;
+  const toolsTo = p => {
+    // primeiro a rolagem passa por cada trabalho, de cima para baixo; depois os nomes viram a esfera
+    const t = (p - 0.06) / 0.5, n = D.works.length;
+    const k = t < 0 || t >= 1 ? -1 : Math.floor(t * n);
+    if (k !== toolsAt) { toolsAt = k; focusGraph("w", k < 0 ? null : D.works[k].id); }
+    sphereTo(ss(0.62, 0.86, p));
+  };
+
   /* ---------- 08 · contato ---------- */
   const toast = $("#toast");
   $("#copyMail").addEventListener("click", async () => {
@@ -508,6 +613,7 @@
     camera(0);
     // sem rolagem animada a viagem vira texto corrido, etapa por etapa
     tripEl.classList.add("flat");
+    $(".tools").classList.add("flat");
     graph.classList.add("in", "ready");
     $$(".who-say .w").forEach(w => (w.style.opacity = 1));
     return;
@@ -528,6 +634,10 @@
 
   // 02 + 03: a viagem inteira é um número só
   tripST = ScrollTrigger.create({ trigger: tripRun, start: "top top", end: "bottom bottom", onUpdate: s => tripTo(s.progress) });
+  // 08: o grafo fica grudado; a rolagem passeia pelos trabalhos e termina na esfera
+  graphFit(); addEventListener("resize", () => { graphFit(); sFrom = null; if (sM > 0) sMeasure(); });
+  document.fonts && document.fonts.ready.then(graphFit);
+  ScrollTrigger.create({ trigger: "#toolsRun", start: "top top", end: "bottom bottom", onUpdate: s => toolsTo(s.progress) });
 
   const mm = gsap.matchMedia();
   mm.add({ wide: "(min-width: 861px)", narrow: "(max-width: 860px)" }, ctx => {
@@ -536,11 +646,6 @@
     gsap.to(".who-say .w", { opacity: 1, ease: "none", stagger: 0.12,
       scrollTrigger: isWide ? { trigger: ".who", start: "top top", end: "bottom bottom", scrub: true } : { trigger: ".who-say", start: "top 72%", end: "bottom 38%", scrub: true } });
     if (!isWide) return;
-    // 06: a demonstração gira um pouco e o número de fundo anda mais devagar que a página
-    pjs.forEach((p, i) => {
-      const st = { trigger: p, start: "top bottom", end: "bottom top", scrub: true };
-      gsap.fromTo(p.querySelector(".d3"), { rotateY: i % 2 ? 9 : -9, yPercent: 5 }, { rotateY: i % 2 ? -9 : 9, yPercent: -5, ease: "none", scrollTrigger: st });
-    });
   });
 
   // 06: a barra fica creme enquanto os projetos estão na tela

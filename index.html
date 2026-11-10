@@ -54,11 +54,11 @@
     </section>
 
     <!-- 01 · quem -->
-    <section class="ch who" id="quem" data-chap="01" data-title="Quem" aria-labelledby="who-t">
+    <section class="ch who" id="quem" data-chap="01" data-title="Sobre mim" aria-labelledby="who-t">
       <div class="who-pin">
         <div class="wrap who-grid">
           <div>
-            <p class="eyebrow">01 — Quem</p>
+            <p class="eyebrow">01 — Sobre mim</p>
             <h2 class="who-say" id="who-t">Sou desenvolvedor Python. Pego dados soltos da cidade e entrego camadas prontas para quem decide. Do banco à API, dos testes ao deploy em Linux.</h2>
           </div>
           <dl class="who-card" id="whoFacts"></dl>
@@ -98,6 +98,9 @@
       </div>
     </section>
 
+    <!-- a cidade agora: uma faixa com o que as camadas públicas dizem neste minuto -->
+    <div class="ticker" id="ticker" aria-label="Niterói agora"><div class="tk-move"><p id="tkA"></p><p aria-hidden="true" id="tkB"></p></div></div>
+
     <!-- 05 · outras frentes -->
     <section class="ch civic" data-chap="05" data-title="Outras frentes" aria-label="Colab e prova de conceito de trânsito">
       <div class="wrap" id="civic"></div>
@@ -125,12 +128,12 @@
 
     <!-- 08 · ferramentas -->
     <section class="ch tools" id="ferramentas" data-chap="08" data-title="Ferramentas" aria-labelledby="tools-t">
-      <div class="wrap">
+      <div class="wrap tools-head">
         <p class="eyebrow">08 — Ferramentas</p>
         <h2 id="tools-t">Onde cada ferramenta <em>trabalhou</em></h2>
-        <p class="lead">Passe o mouse (ou toque) num trabalho para ver o que ele usa, ou numa ferramenta para ver onde ela aparece.</p>
-        <div class="graph" id="graph"></div>
+        <p class="lead">Role para passar por cada trabalho, ou passe o mouse (ou toque) num trabalho ou numa ferramenta.</p>
       </div>
+      <div class="tools-run" id="toolsRun"><div class="tools-pin"><div class="wrap"><div class="graph" id="graph"></div></div></div></div>
     </section>
 
     <!-- 09 · ponto final -->

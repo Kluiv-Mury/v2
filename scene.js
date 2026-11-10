@@ -44,11 +44,11 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
   g.setAttribute("aIn", new THREE.BufferAttribute(aIn, 1));
   g.setAttribute("aMe", new THREE.BufferAttribute(aMe, 1));
   g.setAttribute("aGeo", new THREE.BufferAttribute(aGeo, 2));
-  const uni = { uS: { value: 0 }, uTime: { value: 0 }, uExplode: { value: 0 }, uLift: { value: 0 }, uPx: { value: 60 }, uDim: { value: 1 } };
+  const uni = { uS: { value: 0 }, uTime: { value: 0 }, uExplode: { value: 0 }, uLift: { value: 0 }, uPx: { value: 60 }, uDim: { value: 1 }, uRise: { value: 0 } };
   const dots = new THREE.Points(g, new THREE.ShaderMaterial({
     uniforms: uni, transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
     vertexShader: `
-      uniform float uS, uTime, uExplode, uLift, uPx, uDim;
+      uniform float uS, uTime, uExplode, uLift, uPx, uDim, uRise;
       attribute float aSt, aSnap, aRand, aFill, aIn, aMe;
       attribute vec2 aGeo;
       varying vec3 vCol; varying float vA;
@@ -77,7 +77,14 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
         vec3 p = p0 * w0 + p1 * w1 + p2 * w2 + p3 * w3 + p4 * w4;
         float fl = fract(s);
         p.y += sin(fl * 3.14159) * (aRand - .3) * 1.6;
-        p.y += uLift;
+        // 5 · camadas: enquanto a câmera gira, as colunas sobem e somem (uRise); quando as lâminas se separam,
+        // os pontos descem do alto e viram um anel em cada estação da lâmina de cima, aceso nas bikes paradas
+        float ring = smoothstep(.15, .85, uExplode), an = aSnap / 36. * PI2 - 1.5708;
+        float on = step(aSnap / 36., aFill - .001);
+        float lift = uRise * (1.6 + aRand * 1.4);
+        vec3 pc = p + vec3(0., lift + uLift, 0.);
+        vec3 pr = vec3(aGeo.x + cos(an) * .095, .03 + uLift, aGeo.y + sin(an) * .095);
+        p = mix(pc, pr, ring);
 
         float old = step(aSnap, 2.5), fresh = step(32.5, aSnap);
         vec3 c0 = mix(CREAM, ORANGE, step(.86, aRand));
@@ -87,9 +94,10 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
         vCol = c0 * w0 + c1 * w1 + c2 * w2 + c34 * (w3 + w4);
         float a2 = mix(.95, .28, old);
         vA = (.55 + .3 * aRand) * w0 + .8 * w1 + a2 * w2 + .7 * w3 + mix(.5, .95, aSnap / 36.) * w4;
-        vA *= mix(1., aIn * uDim, uExplode);
+        vCol = mix(vCol, mix(DIM * .7, LIME, on), ring);
+        vA = mix(vA * (1. - smoothstep(.1, .95, uRise)), mix(.4, 1., on) * aIn * uDim, ring);
 
-        float size = .85 * w0 + .95 * w1 + 1.15 * w2 + 1.5 * w3 + (1.05 + aMe * .5) * w4;
+        float size = mix(.85 * w0 + .95 * w1 + 1.15 * w2 + 1.5 * w3 + (1.05 + aMe * .5) * w4, 1.25, ring);
         vec4 mv = modelViewMatrix * vec4(p, 1.);
         gl_Position = projectionMatrix * mv;
         gl_PointSize = max(1.5, size * uPx / -mv.z);
@@ -102,28 +110,31 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
         gl_FragColor = vec4(vCol, a * vA);
       }`,
   }));
-  dots.frustumCulled = false; dots.renderOrder = 10;
+  dots.frustumCulled = false; dots.renderOrder = 100;   // por cima das lâminas
   scene.add(dots);
 
   /* ---------- o mapa e a grade ---------- */
   const mapMat = new THREE.MeshBasicMaterial({ color: CREAM, transparent: true, opacity: 0, depthWrite: false });
-  const cropMat = new THREE.MeshBasicMaterial({ color: CREAM, transparent: true, opacity: 0, depthWrite: false });
   const mapGeo = new THREE.PlaneGeometry(20, 12.25); mapGeo.rotateX(-Math.PI / 2);
   const map = new THREE.Mesh(mapGeo, mapMat);
   map.position.set(wx(1000), 0, wz(612.5)); map.visible = false; scene.add(map);
+  const useMap = tex => {
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy(); tex.colorSpace = THREE.SRGBColorSpace;
+    mapMat.map = tex; mapMat.needsUpdate = true; map.visible = true;
+    mapMats.forEach(m => { m.map = tex; m.needsUpdate = true; });
+    renderer.initTexture(tex); warm();
+  };
+  // o SVG é rasterizado num momento ocioso (a cena inteira já é montada fora da rolagem)
   const img = new Image();
-  img.onload = () => {
+  img.onload = () => (window.requestIdleCallback || setTimeout)(() => {
     try {
       const c = document.createElement("canvas"); c.width = 2048; c.height = 1254;
       const x = c.getContext("2d");
       x.drawImage(img, 0, 0, c.width, c.height);
       x.globalCompositeOperation = "source-in"; x.fillStyle = "#fff"; x.fillRect(0, 0, c.width, c.height);
-      const tex = new THREE.CanvasTexture(c);
-      tex.anisotropy = renderer.capabilities.getMaxAnisotropy(); tex.colorSpace = THREE.SRGBColorSpace;
-      mapMat.map = tex; cropMat.map = tex; mapMat.needsUpdate = cropMat.needsUpdate = true; map.visible = true;
-      renderer.initTexture(tex); warm();
+      useMap(new THREE.CanvasTexture(c));
     } catch (e) { /* sem o mapa, os pontos seguem sozinhos */ }
-  };
+  });
   img.src = mapSrc;
 
   const gridPts = [];
@@ -133,6 +144,9 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
   const grid = new THREE.LineSegments(gridGeo, gridMat); grid.position.set(-0.4, -0.01, 0); scene.add(grid);
 
   /* ---------- as seis camadas ---------- */
+  // cada lâmina é o recorte do Centro e de Icaraí com o mapa bem apagado; por cima, o desenho da camada.
+  // Tudo é montado uma vez; na rolagem só mudam posição, opacidade e o relógio dos shaders
+  const BLUE = 0x6fb4ff, TEAL = 0x5fd8c6, BLD = 0x8d877c;
   const markMat = (color, size, shape) => new THREE.ShaderMaterial({
     transparent: true, depthWrite: false,
     uniforms: { uColor: { value: new THREE.Color(color) }, uSize: { value: size }, uShape: { value: shape }, uO: { value: 0 }, uPx: uni.uPx },
@@ -149,64 +163,105 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
       }`,
   });
   const ptsOf = list => { const a = []; list.forEach(([x, y]) => { if (inCrop(x, y)) a.push(wx(x), 0.02, wz(y)); }); const bg = new THREE.BufferGeometry(); bg.setAttribute("position", new THREE.Float32BufferAttribute(a, 3)); return bg; };
+  const stack = new THREE.Group(); scene.add(stack); stack.visible = false;
+  const mapMats = [];
+  let wazeMat = null, wazePts = null;
   const fades = [];   // [material, opacidade cheia, é uniform?, camada]
   const groups = [], plates = [];
-  // cada lâmina é um vidro com uma grade fina e a borda mais clara: lê como superfície, não como sombra
-  const glass = (() => {
-    const c = document.createElement("canvas"); c.width = c.height = 512;
-    const x = c.getContext("2d");
-    const gr = x.createRadialGradient(256, 256, 40, 256, 256, 380); gr.addColorStop(0, "rgba(255,255,255,.55)"); gr.addColorStop(1, "rgba(255,255,255,1)");
-    x.fillStyle = gr; x.fillRect(0, 0, 512, 512);
-    x.strokeStyle = "rgba(0,0,0,.28)"; x.lineWidth = 1;
-    for (let k = 1; k < 16; k++) { const v = k * 32 + .5; x.beginPath(); x.moveTo(v, 0); x.lineTo(v, 512); x.moveTo(0, v); x.lineTo(512, v); x.stroke(); }
-    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
-  })();
-  const slab = new THREE.BufferGeometry(), TH = 0.06;
-  slab.setAttribute("position", new THREE.Float32BufferAttribute([
-    crop.x0, -TH, crop.z0, crop.x1, -TH, crop.z0, crop.x1, -TH, crop.z0, crop.x1, -TH, crop.z1, crop.x1, -TH, crop.z1, crop.x0, -TH, crop.z1, crop.x0, -TH, crop.z1, crop.x0, -TH, crop.z0,
-    crop.x0, 0, crop.z0, crop.x0, -TH, crop.z0, crop.x1, 0, crop.z0, crop.x1, -TH, crop.z0, crop.x1, 0, crop.z1, crop.x1, -TH, crop.z1, crop.x0, 0, crop.z1, crop.x0, -TH, crop.z1], 3));
-  const stack = new THREE.Group(); scene.add(stack); stack.visible = false;
   const plateGeo = new THREE.PlaneGeometry(crop.s, crop.s); plateGeo.rotateX(-Math.PI / 2);
   const edge = new THREE.BufferGeometry();
   edge.setAttribute("position", new THREE.Float32BufferAttribute([crop.x0, 0, crop.z0, crop.x1, 0, crop.z0, crop.x1, 0, crop.z1, crop.x0, 0, crop.z1], 3));
-  let wazeMat = null, wazePts = null;
+  const slab = new THREE.BufferGeometry(), TH = 0.05;
+  slab.setAttribute("position", new THREE.Float32BufferAttribute([
+    crop.x0, 0, crop.z0, crop.x0, -TH, crop.z0, crop.x1, 0, crop.z0, crop.x1, -TH, crop.z0, crop.x1, 0, crop.z1, crop.x1, -TH, crop.z1, crop.x0, 0, crop.z1, crop.x0, -TH, crop.z1,
+    crop.x0, -TH, crop.z0, crop.x1, -TH, crop.z0, crop.x1, -TH, crop.z0, crop.x1, -TH, crop.z1, crop.x1, -TH, crop.z1, crop.x0, -TH, crop.z1, crop.x0, -TH, crop.z1, crop.x0, -TH, crop.z0], 3));
+  // o mesmo recorte do mapa em todas as lâminas (uma geometria, um material)
+  const cg = new THREE.PlaneGeometry(crop.s, crop.s); cg.rotateX(-Math.PI / 2);
+  { const uv = cg.attributes.uv, u0 = CROP.x / 2000, u1 = (CROP.x + CROP.s) / 2000, v1 = 1 - CROP.y / 1225, v0 = 1 - (CROP.y + CROP.s) / 1225;
+    for (let k = 0; k < uv.count; k++) uv.setXY(k, u0 + uv.getX(k) * (u1 - u0), v0 + uv.getY(k) * (v1 - v0)); }
+  const inCropW = (x, z) => x > crop.x0 + 0.05 && x < crop.x1 - 0.05 && z > crop.z0 + 0.05 && z < crop.z1 - 0.05;
+  const uTime = uni.uTime;
+  let jamGroup = null, jamMat = [], bld = null;
+
   layers.forEach((l, i) => {
-    const gr = new THREE.Group(); gr.renderOrder = i;
-    const pm = new THREE.MeshBasicMaterial({ color: l.mine ? 0x3a1a0a : 0x24221e, map: glass, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
-    const plate = new THREE.Mesh(plateGeo, pm); plate.position.set(crop.cx, 0, crop.cz); plate.renderOrder = i * 2; plate.userData.k = i;
-    fades.push([pm, l.mine ? 0.7 : 0.55, false, i]);
-    const em = new THREE.LineBasicMaterial({ color: l.mine ? ORANGE : CREAM, transparent: true, opacity: 0, depthWrite: false });
-    const loop = new THREE.LineLoop(edge, em); loop.renderOrder = i * 2 + 1;
-    const sm = new THREE.LineBasicMaterial({ color: l.mine ? ORANGE : CREAM, transparent: true, opacity: 0, depthWrite: false });
-    const side = new THREE.LineSegments(slab, sm); side.renderOrder = i * 2 + 1;
-    fades.push([em, l.mine ? 1 : 0.42, false, i], [sm, l.mine ? 0.45 : 0.16, false, i]);
-    gr.add(plate, loop, side); plates.push(plate);
-    const add = (o, mat, full, u) => { o.renderOrder = i * 2 + 1; gr.add(o); fades.push([mat, full, u, i]); };
+    const gr = new THREE.Group();
+    const pm = new THREE.MeshBasicMaterial({ color: l.mine ? 0x1e120b : 0x13120f, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
+    const plate = new THREE.Mesh(plateGeo, pm); plate.position.set(crop.cx, 0, crop.cz); plate.renderOrder = i * 3; plate.userData.k = i;
+    const mm = new THREE.MeshBasicMaterial({ color: CREAM, map: null, transparent: true, opacity: 0, depthWrite: false });
+    const mapPlate = new THREE.Mesh(cg, mm); mapPlate.position.set(crop.cx, 0.004, crop.cz); mapPlate.renderOrder = i * 3 + 1;
+    mapMats.push(mm);
+    const em = new THREE.LineBasicMaterial({ color: l.mine ? ORANGE : 0xc9a96b, transparent: true, opacity: 0, depthWrite: false });
+    const loop = new THREE.LineLoop(edge, em); loop.renderOrder = i * 3 + 2;
+    const side = new THREE.LineSegments(slab, em); side.renderOrder = i * 3 + 2;
+    fades.push([pm, 0.86, false, i], [mm, l.mine ? 0.2 : 0.14, false, i], [em, l.mine ? 1 : 0.55, false, i]);
+    gr.add(plate, mapPlate, loop, side); plates.push(plate);
+    // instâncias e tubos ficam fora da tela do ponto de vista do three (a esfera de corte é a da peça na origem)
+    const add = (o, mat, full, u) => { o.renderOrder = i * 3 + 2; o.frustumCulled = false; gr.add(o); fades.push([mat, full, u, i]); return o; };
+
     if (i === 0) {
-      // o recorte do mapa e os prédios (blocos ilustrativos, semente fixa)
-      const cg = new THREE.PlaneGeometry(crop.s, crop.s); cg.rotateX(-Math.PI / 2);
-      const uv = cg.attributes.uv, u0 = CROP.x / 2000, u1 = (CROP.x + CROP.s) / 2000, v1 = 1 - CROP.y / 1225, v0 = 1 - (CROP.y + CROP.s) / 1225;
-      for (let k = 0; k < uv.count; k++) uv.setXY(k, u0 + uv.getX(k) * (u1 - u0), v0 + uv.getY(k) * (v1 - v0));
-      const cm = new THREE.Mesh(cg, cropMat); cm.position.set(crop.cx, 0.01, crop.cz);
-      add(cm, cropMat, 0.5);
-      const bm = new THREE.MeshLambertMaterial({ color: 0x5a554b, transparent: true, opacity: 0 });
-      const boxes = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), bm, 38);
-      const m4 = new THREE.Matrix4(); let sd = 11; const r2 = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
-      for (let k = 0; k < 38; k++) {
-        const w = 0.14 + r2() * 0.24, d = 0.14 + r2() * 0.24, hgt = 0.08 + r2() * r2() * 0.5;
-        m4.makeScale(w, hgt, d); m4.setPosition(crop.x0 + 0.4 + r2() * (crop.s - 0.8), hgt / 2 + 0.01, crop.z0 + 0.4 + r2() * (crop.s - 0.8));
-        boxes.setMatrixAt(k, m4);
-      }
-      add(boxes, bm, 0.95);
-    } else if (i === 1) { const m = markMat(CREAM, 2.6, 1); add(new THREE.Points(ptsOf(geo.gauges), m), m, 0.95, true); }
-    else if (i === 2) { const m = markMat(CREAM, 1.5, 2); add(new THREE.Points(ptsOf(geo.cams), m), m, 0.95, true); }
-    else if (i === 3) {
-      const a = [];
-      geo.routes.forEach(r => { for (let k = 1; k < r.p.length; k++) { const [x0, y0] = r.p[k - 1], [x1, y1] = r.p[k]; if (inCrop(x0, y0) && inCrop(x1, y1)) a.push(wx(x0), 0.02, wz(y0), wx(x1), 0.02, wz(y1)); } });
-      const bg = new THREE.BufferGeometry(); bg.setAttribute("position", new THREE.Float32BufferAttribute(a, 3));
-      const m = new THREE.LineBasicMaterial({ color: CREAM, transparent: true, opacity: 0, depthWrite: false });
-      add(new THREE.LineSegments(bg, m), m, 0.8);
+      // edificações: os prédios do OSM no recorte, cada um como uma caixa orientada pelo contorno.
+      // Altura em metros, exagerada 4 vezes para ler de longe
+      const bm = new THREE.MeshLambertMaterial({ color: BLD, emissive: 0x23211c, transparent: true, opacity: 0 });
+      const box = new THREE.BoxGeometry(1, 1, 1); box.translate(0, 0.5, 0);
+      fetch("edificios.json").then(r => r.json()).then(({ b }) => {
+        const n = b.length / 6, im = new THREE.InstancedMesh(box, bm, n), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), sc = new THREE.Vector3(), ps = new THREE.Vector3();
+        for (let k = 0; k < n; k++) {
+          const [x, y, w, d, a, h] = b.slice(k * 6, k * 6 + 6);
+          q.setFromAxisAngle(up, -a); sc.set(w / U, h / 1165 * 4, d / U); ps.set(wx(x), 0.006, wz(y));
+          m4.compose(ps, q, sc); im.setMatrixAt(k, m4);
+        }
+        im.instanceMatrix.needsUpdate = true;
+        add(im, bm, 1); bld = im; warm();
+      }).catch(() => {});
+    } else if (i === 1) {
+      // pluviômetros: um cilindro de vidro azul em cada posição pública; a altura e as gotas são ilustrativas
+      const pts = geo.gauges.map(([x, y]) => [wx(x), wz(y)]).filter(([x, z]) => inCropW(x, z));
+      const cm = new THREE.MeshBasicMaterial({ color: BLUE, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+      const cyl = new THREE.CylinderGeometry(0.045, 0.045, 1, 20, 1, true); cyl.translate(0, 0.5, 0);
+      const im = new THREE.InstancedMesh(cyl, cm, Math.max(1, pts.length)), m4 = new THREE.Matrix4();
+      let sd = 5; const r2 = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+      const hs = pts.map(() => 0.12 + r2() * 0.22);
+      pts.forEach(([x, z], k) => { m4.makeScale(1, hs[k], 1); m4.setPosition(x, 0.004, z); im.setMatrixAt(k, m4); });
+      add(im, cm, 0.42);
+      const rm = new THREE.MeshBasicMaterial({ color: BLUE, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
+      const ring = new THREE.RingGeometry(0.05, 0.062, 28); ring.rotateX(-Math.PI / 2);
+      const ri = new THREE.InstancedMesh(ring, rm, Math.max(1, pts.length));
+      pts.forEach(([x, z], k) => { m4.makeTranslation(x, 0.008, z); ri.setMatrixAt(k, m4); });
+      add(ri, rm, 0.9);
+      // gotas: caem dentro de cada cilindro, no relógio do shader
+      const D = 14, dp = new Float32Array(pts.length * D * 3), dr = new Float32Array(pts.length * D);
+      pts.forEach(([x, z], k) => { for (let j = 0; j < D; j++) { const a = r2() * 6.283, rr = r2() * 0.032, o = (k * D + j); dp[o * 3] = x + Math.cos(a) * rr; dp[o * 3 + 1] = hs[k]; dp[o * 3 + 2] = z + Math.sin(a) * rr; dr[o] = r2(); } });
+      const dg = new THREE.BufferGeometry(); dg.setAttribute("position", new THREE.BufferAttribute(dp, 3)); dg.setAttribute("aR", new THREE.BufferAttribute(dr, 1));
+      const dm = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        uniforms: { uTime, uO: { value: 0 }, uPx: uni.uPx },
+        vertexShader: `uniform float uTime, uPx; attribute float aR; varying float vF;
+          void main() { float f = fract(aR + uTime * (.35 + aR * .3)); vF = f; vec3 p = position; p.y *= 1. - f;
+            vec4 mv = modelViewMatrix * vec4(p, 1.); gl_Position = projectionMatrix * mv; gl_PointSize = max(1.5, .7 * uPx / -mv.z); }`,
+        fragmentShader: `uniform float uO; varying float vF; void main() { float d = length(gl_PointCoord - .5); if (d > .5) discard;
+          gl_FragColor = vec4(.6, .8, 1., (1. - d * 2.) * uO * sin(vF * 3.14159)); }` });
+      const drops = new THREE.Points(dg, dm); drops.frustumCulled = false;
+      add(drops, dm, 0.9, true);
+    } else if (i === 2) {
+      // câmeras: um ponto e o cone do que ela enxerga, cada uma virada para um lado
+      const pts = geo.cams.map(([x, y]) => [wx(x), wz(y)]).filter(([x, z]) => inCropW(x, z));
+      const km = new THREE.MeshBasicMaterial({ color: CREAM, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
+      const cone = new THREE.ConeGeometry(0.05, 0.16, 4, 1, true); cone.translate(0, -0.08, 0); cone.rotateZ(Math.PI / 2);
+      const im = new THREE.InstancedMesh(cone, km, Math.max(1, pts.length)), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), ps = new THREE.Vector3();
+      pts.forEach(([x, z], k) => { q.setFromAxisAngle(up, (k * 2.399) % 6.283); ps.set(x, 0.05, z); m4.compose(ps, q, one); im.setMatrixAt(k, m4); });
+      add(im, km, 0.22);
+      const m = markMat(CREAM, 1.6, 2); add(new THREE.Points(ptsOf(geo.cams).translate(0, 0.03, 0), m), m, 0.95, true);
+    } else if (i === 3) {
+      // ônibus: as linhas como tubos, na posição real das rotas
+      const tm = new THREE.MeshLambertMaterial({ color: TEAL, emissive: 0x0d3a33, transparent: true, opacity: 0 });
+      geo.routes.forEach(r => {
+        const seg = []; r.p.forEach(([x, y]) => { if (inCrop(x, y)) seg.push(new THREE.Vector3(wx(x), 0.03, wz(y))); });
+        if (seg.length < 2) return;
+        const curve = new THREE.CatmullRomCurve3(seg, false, "centripetal", 0.2);
+        add(new THREE.Mesh(new THREE.TubeGeometry(curve, Math.min(220, seg.length * 3), 0.016, 6, false), tm), tm, 0.92);
+      });
     } else if (i === 4) {
+      // trânsito: os trechos do Waze em fitas que sobem e esquentam com o nível (1 a 5); os alertas por cima
+      jamGroup = new THREE.Group(); gr.add(jamGroup);
       wazeMat = markMat(ORANGE, 2.1, 3);
       wazePts = new THREE.Points(new THREE.BufferGeometry(), wazeMat); wazePts.frustumCulled = false;
       wazePts.geometry.setAttribute("position", new THREE.Float32BufferAttribute([], 3));
@@ -214,10 +269,27 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
     }
     stack.add(gr); groups.push(gr);
   });
+  const JAM = [0xf3e27a, 0xf7c548, 0xf59331, 0xef5a2a, 0xd93425];
+  function buildJams(list) {
+    if (!jamGroup) return 0;
+    jamGroup.children.slice().forEach(c => { jamGroup.remove(c); c.geometry.dispose(); });
+    jamMat.forEach(m => { const f = fades.findIndex(x => x[0] === m); if (f >= 0) fades.splice(f, 1); m.dispose(); });
+    jamMat = JAM.map(c => new THREE.MeshLambertMaterial({ color: c, emissive: c, emissiveIntensity: 0.35, transparent: true, opacity: 0 }));
+    jamMat.forEach(m => fades.push([m, 0.95, false, 4]));
+    let n = 0;
+    list.forEach(({ n: lvl, g }) => {
+      const seg = g.filter(([x, y]) => inCrop(x, y)).map(([x, y]) => new THREE.Vector3(wx(x), 0.02 + lvl * 0.018, wz(y)));
+      if (seg.length < 2) return;
+      const k = Math.max(0, Math.min(4, lvl - 1));
+      const mesh = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(seg, false, "centripetal", 0.1), Math.min(160, seg.length * 3), 0.01 + lvl * 0.003, 5, false), jamMat[k]);
+      mesh.renderOrder = 4 * 3 + 2; jamGroup.add(mesh); n++;
+    });
+    return n;
+  }
   // o fio que liga o Terminal de uma camada à outra
   const wireGeo = new THREE.BufferGeometry(); wireGeo.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 1, 0], 3));
   const wireMat = new THREE.LineBasicMaterial({ color: LIME, transparent: true, opacity: 0, depthWrite: false, depthTest: false });
-  const wire = new THREE.Line(wireGeo, wireMat); wire.position.set(wx(term.x), 0, wz(term.y)); wire.renderOrder = 20; stack.add(wire);
+  const wire = new THREE.Line(wireGeo, wireMat); wire.position.set(wx(term.x), 0, wz(term.y)); wire.renderOrder = 40; stack.add(wire);
 
   /* ---------- câmera ---------- */
   const KEYS = [
@@ -278,8 +350,8 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
     const time = (now - t0) / 1000;
     uni.uTime.value = time;
     uni.uS.value = Math.min(4, state);
-    const e = explode;
-    uni.uExplode.value = e; uni.uLift.value = (LN - 1) * GAP * e;
+    const e = explode, rise = ss(0, 1, state - 4);   // rise: o giro da câmera da etapa 05 para a 06
+    uni.uExplode.value = e; uni.uLift.value = (LN - 1) * GAP * e + up[LN - 1] * e; uni.uRise.value = rise;
 
     const i = Math.min(4, Math.floor(state)), f = ss(0, 1, state - i), A = KEYS[i], Bk = KEYS[i + 1];
     va.fromArray(A.p); vb.fromArray(Bk.p); vp.lerpVectors(va, vb, f);
@@ -292,18 +364,20 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
     camera.position.copy(vp); camera.lookAt(vt);
 
     const mapO = ss(3.1, 4, state);
-    mapMat.opacity = 0.34 * mapO * (1 - e);
+    mapMat.opacity = 0.34 * mapO * (1 - Math.max(e, rise * 0.75));
     gridMat.opacity = 0.13 * ss(2.4, 3, state) * (1 - ss(3.5, 4.2, state));
-    const on = e > 0.002; stack.visible = on;
+    // durante o giro só a lâmina de baixo aparece, com os prédios crescendo do chão; depois as outras sobem
+    const on = e > 0.002 || rise > 0.002; stack.visible = on;
+    if (bld) bld.scale.y = Math.max(0.001, ss(0.15, 1, rise));
     if (on) {
-      const o = ss(0, 0.3, e);
+      const o = ss(0, 0.3, e), o0 = Math.max(o, ss(0, 0.6, rise));
       groups.forEach((gr, k) => {
         hl[k] += ((focus < 0 ? 1 : k === focus ? 1 : 0.16) - hl[k]) * 0.12;
         up[k] += ((k === focus ? 0.24 : 0) - up[k]) * 0.12;
         gr.position.y = k * GAP * e + up[k] * e;
       });
       fades.forEach(([m, full, u, k]) => {
-        const v = Math.min(1, full * o * hl[k] * (1 + up[k] * 2.6));
+        const v = Math.min(1, full * (k === 0 ? o0 : o) * hl[k] * (1 + up[k] * 2.6));
         if (u) m.uniforms.uO.value = v; else m.opacity = v;
       });
       uni.uDim.value = hl[LN - 1];
@@ -333,7 +407,6 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
   function warm() {
     const was = [stack.visible, map.visible];
     stack.visible = true; map.visible = !!mapMat.map;
-    renderer.initTexture(glass);
     const p = renderer.compileAsync ? renderer.compileAsync(scene, camera) : Promise.resolve(renderer.compile(scene, camera));
     stack.visible = was[0]; map.visible = was[1];
     warming = p.catch(() => {});
@@ -356,6 +429,8 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
       g.attributes.aFill.needsUpdate = true;
     },
     // pts em coordenadas do mapa; devolve quantos caíram no recorte
+    // trechos do Waze: [{ n: nível 1-5, g: [[x, y] no mapa] }]; devolve quantos caíram no recorte
+    setJams(list) { const n = buildJams(list); warm(); return n; },
     setWaze(pts) {
       const a = []; pts.forEach(([x, y]) => { if (inCrop(x, y)) a.push(wx(x), 0.03, wz(y)); });
       wazePts.geometry.setAttribute("position", new THREE.Float32BufferAttribute(a, 3));
