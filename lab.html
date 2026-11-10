@@ -1,5 +1,21 @@
 <!DOCTYPE html>
 <html lang="pt-BR" data-bs-theme="dark"><head>
+<script>
+(() => {
+  let paused = false, n = 0;
+  const held = new Map(), raf = window.requestAnimationFrame.bind(window), caf = window.cancelAnimationFrame.bind(window), si = window.setInterval.bind(window);
+  window.requestAnimationFrame = cb => { if (!paused) return raf(cb); const id = -(++n); held.set(id, cb); return id; };
+  window.cancelAnimationFrame = id => { if (id < 0) held.delete(id); else caf(id); };
+  window.setInterval = (fn, ms, ...a) => si(() => { if (!paused && typeof fn === "function") fn(...a); }, ms);
+  addEventListener("message", e => {
+    if (e.origin !== location.origin || !e.data || e.data.type !== "lab-pause") return;
+    paused = !!e.data.on;
+    document.documentElement.classList.toggle("lab-paused", paused);
+    if (!paused) { const cbs = [...held.values()]; held.clear(); cbs.forEach(cb => raf(cb)); }
+  });
+})();
+</script>
+<style>.lab-paused *, .lab-paused *::before, .lab-paused *::after { animation-play-state: paused !important; }</style>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Laboratório · Gêmeo simplificado</title>

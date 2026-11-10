@@ -315,6 +315,11 @@
   addEventListener("load", () => setTimeout(() => idle(loadLab, { timeout: 4000 }), 1800));
   const labIO = new IntersectionObserver(es => { if (es[0].isIntersecting) { labIO.disconnect(); loadLab(); } }, { rootMargin: "200% 0px" });
   labIO.observe(labFrame);
+  // o quadro é do mesmo site, então o navegador não o pausa sozinho: longe da tela, ele para de animar
+  let labNear = false;
+  const labPause = () => { const f = $("iframe", labFrame); if (f && f.contentWindow) f.contentWindow.postMessage({ type: "lab-pause", on: !labNear }, location.origin); };
+  new IntersectionObserver(([e]) => { labNear = e.isIntersecting; labPause(); }, { rootMargin: "40% 0px" }).observe(labFrame);
+  labFrame.addEventListener("load", labPause, true);
   // a altura do quadro muda muitas vezes enquanto o React monta: o refresh só roda quando ela assenta
   let labH = 0, labT = 0;
   addEventListener("message", e => {
@@ -546,4 +551,12 @@
 
   document.fonts && document.fonts.ready.then(() => ScrollTrigger.refresh());
   addEventListener("load", () => ScrollTrigger.refresh());
+  // se a página muda de altura (uma seção pulada que aparece com tamanho diferente do estimado, o quadro
+  // de linhas abrindo), as posições da rolagem são recalculadas uma vez, quando ela para de mudar
+  let pageH = document.documentElement.scrollHeight, pageT = 0;
+  new ResizeObserver(() => {
+    const nh = document.documentElement.scrollHeight;
+    if (Math.abs(nh - pageH) < 4) return;
+    pageH = nh; clearTimeout(pageT); pageT = setTimeout(() => ScrollTrigger.refresh(), 250);
+  }).observe(document.body);
 })();

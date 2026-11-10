@@ -78,6 +78,11 @@ p { margin: 0; }
 @media (max-width: 760px) { .bar-chapter, .bar-clock { display: none; } .bar { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; } .bar-mark { min-width: 0; } .bar-mark b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } }
 
 .ch { position: relative; }
+/* longe da tela o navegador pula layout e pintura destas seções; o tamanho estimado segura a rolagem
+   até a primeira vez que elas aparecem, e daí em diante vale o tamanho real que ele guardou */
+.civic { content-visibility: auto; contain-intrinsic-size: auto 2100px; }
+.board { content-visibility: auto; contain-intrinsic-size: auto 1400px; }
+.tools { content-visibility: auto; contain-intrinsic-size: auto 1240px; }
 
 /* 00 · abertura */
 .hero { height: 100svh; }

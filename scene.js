@@ -121,6 +121,7 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
       const tex = new THREE.CanvasTexture(c);
       tex.anisotropy = renderer.capabilities.getMaxAnisotropy(); tex.colorSpace = THREE.SRGBColorSpace;
       mapMat.map = tex; cropMat.map = tex; mapMat.needsUpdate = cropMat.needsUpdate = true; map.visible = true;
+      renderer.initTexture(tex); warm();
     } catch (e) { /* sem o mapa, os pontos seguem sozinhos */ }
   };
   img.src = mapSrc;
@@ -228,11 +229,12 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
     { p: [crop.cx + 6.6, 6.9, crop.cz + 7.6], t: [crop.cx, 1.45, crop.cz] },
   ];
   const vp = new THREE.Vector3(), vt = new THREE.Vector3(), va = new THREE.Vector3(), vb = new THREE.Vector3(), proj = new THREE.Vector3();
-  let W = 1, H = 1, pull = 1, narrow = false;
+  let W = 1, H = 1, pull = 1, narrow = false, dprMax = 1, dpr = 1;
   const resize = () => {
     const r = canvas.getBoundingClientRect();
     W = Math.max(1, r.width); H = Math.max(1, r.height); narrow = W < 860;
-    const dpr = Math.min(devicePixelRatio || 1, narrow ? 1.5 : 1.75);
+    dprMax = Math.min(devicePixelRatio || 1, narrow ? 1.5 : 1.75);
+    dpr = Math.min(dpr === 1 && dprMax > 1 ? dprMax : dpr, dprMax);
     renderer.setPixelRatio(dpr); renderer.setSize(W, H, false);
     camera.aspect = W / H;
     // a cena fica à direita do texto na tela larga e acima dele na estreita
@@ -258,8 +260,21 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
   };
   const setHover = k => { if (k === hover) return; hover = k; if (onFocus) onFocus(k, "scene"); };
   const ss = (a, b, v) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
+  // resolução que se adapta: se os quadros passam de ~20 ms a imagem perde nitidez antes de perder fluidez,
+  // e volta a ficar nítida quando sobra folga. Cada troca espera um tempo para não ficar oscilando
+  let last = 0, slow = 0, fast = 0;
+  const adapt = now => {
+    const dt = last ? now - last : 16.7; last = now;
+    if (dt > 100) return;   // aba voltou do fundo: não conta
+    if (dt > 20) { slow++; fast = 0; } else if (dt < 13) { fast++; slow = Math.max(0, slow - 1); } else slow = Math.max(0, slow - 1);
+    let next = dpr;
+    if (slow > 24 && dpr > 1) next = Math.max(1, dpr - 0.25);
+    else if (fast > 240 && dpr < dprMax) next = Math.min(dprMax, dpr + 0.25);
+    if (next !== dpr) { dpr = next; slow = fast = 0; renderer.setPixelRatio(dpr); renderer.setSize(W, H, false); uni.uPx.value = H * dpr * 0.085; }
+  };
   const frame = now => {
     raf = requestAnimationFrame(frame);
+    adapt(now);
     const time = (now - t0) / 1000;
     uni.uTime.value = time;
     uni.uS.value = Math.min(4, state);
@@ -312,6 +327,18 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
       }
     }
   };
+  // compila antes todos os shaders e sobe as texturas: senão isso acontece no primeiro quadro em que
+  // cada coisa aparece, no meio da rolagem (as camadas, por exemplo, só aparecem perto do fim)
+  let warming = null;
+  function warm() {
+    const was = [stack.visible, map.visible];
+    stack.visible = true; map.visible = !!mapMat.map;
+    renderer.initTexture(glass);
+    const p = renderer.compileAsync ? renderer.compileAsync(scene, camera) : Promise.resolve(renderer.compile(scene, camera));
+    stack.visible = was[0]; map.visible = was[1];
+    warming = p.catch(() => {});
+    return warming;
+  }
   const onMove = ev => {
     mx = (ev.clientX / innerWidth - 0.5) * 2; my = (ev.clientY / innerHeight - 0.5) * 2;
     // em cima de um texto de camada quem manda é o texto
@@ -320,7 +347,9 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
   const onDown = ev => { if (ev.pointerType !== "mouse") { const k = pick(ev.clientX, ev.clientY); if (k >= 0 && onFocus) onFocus(k === focus ? -1 : k, "tap"); } };
 
   resize();
+  warm();
   return {
+    ready: () => warming,
     set(s, e) { state = s; explode = e; },
     setBikes() {
       stations.forEach((s, i) => { const f = s.bikes == null ? 0.5 : Math.min(1, s.bikes / Math.max(1, s.cap)); for (let k = 0; k < S; k++) aFill[i * S + k] = f; });
@@ -334,7 +363,7 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
     },
     // -1 tira o destaque
     focus(k) { focus = k; },
-    start() { if (raf) return; raf = requestAnimationFrame(frame); addEventListener("pointermove", onMove, { passive: true }); addEventListener("pointerdown", onDown, { passive: true }); },
+    start() { if (raf) return; last = 0; raf = requestAnimationFrame(frame); addEventListener("pointermove", onMove, { passive: true }); addEventListener("pointerdown", onDown, { passive: true }); },
     stop() { cancelAnimationFrame(raf); raf = 0; removeEventListener("pointermove", onMove); removeEventListener("pointerdown", onDown); },
     resize,
   };
