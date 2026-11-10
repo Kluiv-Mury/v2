@@ -394,7 +394,8 @@ p { margin: 0; }
 /* demo 2: mapa de ladrilhos do Brasil, cada estado é um bloco que cresce */
 .d3-uf { font-size: clamp(9px, 1.05vw, 14px); }
 .uf-plane { display: grid; grid-template-columns: repeat(7, 4.2em); grid-template-rows: repeat(8, 4.2em); gap: .5em; transform: rotateX(54deg) rotateZ(-24deg); transform-style: preserve-3d; }
-.t { position: relative; transform-style: preserve-3d; transform: scale3d(1, 1, .02); opacity: 0; transition: transform 1.2s var(--ease) var(--d), opacity .4s ease var(--d); }
+/* cada estado sobe do chão numa onda de norte a sul: devagar no fim, sem tranco */
+.t { position: relative; transform-style: preserve-3d; transform: translate3d(0, 0, -1.6em) scale3d(.92, .92, .02); opacity: 0; transition: transform 1.9s cubic-bezier(.16, 1, .3, 1) var(--d), opacity 1s cubic-bezier(.23, 1, .32, 1) var(--d); }
 .pj.on .t { transform: none; opacity: 1; }
 .t i { position: absolute; display: block; }
 .tt { inset: 0; display: grid; place-items: center; border-radius: 3px; transform: translateZ(var(--h)); background: color-mix(in srgb, var(--orange) calc(var(--a) * 100%), var(--ink)); color: var(--cream); font: 600 1em var(--f-mono); font-style: normal; }
@@ -450,6 +451,9 @@ p { margin: 0; }
 .sphere > b { position: absolute; left: 0; top: 0; border-radius: 50%; opacity: 0; pointer-events: none; }
 .s-rim { transform: translate(-50%, -50%); border: 1px solid var(--line); background: radial-gradient(closest-side, rgba(var(--orange-rgb), .07), transparent 72%); }
 .s-eq { border: 1px dashed rgba(var(--orange-rgb), .45); }
+/* a bola de luz: camadas de gradiente (sem filtro de desfoque, que pesa); o centro quase branco puxado para o lima */
+.s-core { background: radial-gradient(circle, #fffbea 0 5%, rgba(244, 255, 170, .96) 11%, rgba(230, 255, 87, .82) 20%, rgba(255, 140, 60, .6) 33%, rgba(255, 90, 31, .26) 48%, rgba(255, 90, 31, .08) 60%, transparent 70%); mix-blend-mode: screen; }
+.s-halo { background: radial-gradient(circle, rgba(255, 120, 50, .2) 0, rgba(255, 90, 31, .1) 30%, rgba(230, 255, 87, .04) 50%, transparent 66%); }
 .sphere span { position: absolute; left: 0; top: 0; display: inline-flex; align-items: center; gap: .6rem; white-space: nowrap; color: var(--cream); will-change: transform, opacity; }
 .sphere .sw { min-height: 40px; padding: .35rem .9rem; font: 600 .98rem var(--f-text); letter-spacing: -.015em; }
 .sphere .st { min-height: 34px; padding: .25rem .8rem; font: 500 .78rem var(--f-mono); }
@@ -471,9 +475,10 @@ p { margin: 0; }
 .graph.in .link { stroke-dashoffset: 0; }
 .graph.ready .link { transition: stroke .3s, opacity .3s; }
 .link.on { stroke: var(--orange); stroke-width: 1.6; }
-.graph.focus .link:not(.on) { opacity: .12; }
-.pulse { fill: none; stroke: var(--lime); stroke-width: 2.6; stroke-linecap: round; stroke-dasharray: .09 .91; stroke-dashoffset: .09; animation: gpulse 1.5s linear infinite; animation-delay: calc(var(--k) * 110ms); pointer-events: none; }
-@keyframes gpulse { to { stroke-dashoffset: -.91; } }
+.graph.focus .link:not(.on) { opacity: .07; }
+.graph.morph .link { stroke: rgba(var(--orange-rgb), .75); stroke-width: 1.2; transition: none; stroke-dasharray: none; }
+.comet { fill: none; stroke: var(--lime); stroke-width: 2.4; stroke-linecap: round; stroke-dasharray: .07 1.2; stroke-dashoffset: .07; pointer-events: none; }
+.comet.halo { stroke: rgba(230, 255, 87, .22); stroke-width: 9; }
 .g-col { grid-row: 1; display: grid; gap: 8px; align-content: center; }
 .g-col button { display: flex; align-items: center; gap: .6rem; min-height: 40px; padding: .35rem .9rem; border: 1px solid var(--line); border-radius: 999px; background: var(--ink-2); cursor: pointer; text-align: left; opacity: 0; transform: translateX(var(--dx)); transition: opacity .5s calc(var(--k) * 28ms), transform .7s var(--ease) calc(var(--k) * 28ms); }
 .graph.in .g-col button { opacity: 1; transform: none; }
@@ -484,6 +489,14 @@ p { margin: 0; }
 .g-right button { justify-self: start; min-height: 34px; padding: .25rem .8rem; font: 500 .78rem var(--f-mono); }
 .g-col button i { margin-left: auto; font-style: normal; color: var(--mute); font: .7rem var(--f-mono); }
 .g-col button.on { background: var(--orange); border-color: var(--orange); color: var(--ink); }
+/* trabalho escolhido: a cor entra como uma maré da esquerda para a direita, em vez de trocar de uma vez */
+.g-left button { position: relative; isolation: isolate; overflow: hidden; }
+.g-left button::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--orange); transform: scaleX(0); transform-origin: left; transition: transform .5s cubic-bezier(.65, 0, .35, 1); }
+.g-left button.on { background: var(--ink-2); }
+.g-left button.on::before { transform: none; }
+.graph.ready .g-left button { transition: color .3s ease .12s, border-color .3s ease, opacity .25s, transform .4s var(--ease); }
+/* ferramenta: só acende quando a luz da ligação chega (o atraso vem do script) */
+.graph.ready .g-right button { transition: background-color .3s ease var(--arr, 0ms), color .3s ease var(--arr, 0ms), border-color .3s ease var(--arr, 0ms), opacity .3s ease, transform .3s var(--ease); }
 .g-col button.on i { color: var(--ink); }
 .graph.in .g-left button.on { transform: translateX(6px); }
 .graph.in .g-right button.on { transform: translateX(-6px); }
@@ -531,6 +544,7 @@ p { margin: 0; }
   *, *::before, *::after { animation: none !important; transition-duration: .01ms !important; transition-delay: 0s !important; }
   .who-say .w { opacity: 1; }
   .link { stroke-dashoffset: 0; }
+  .g-left button::before { transition: none; }
 .tools-run { height: auto; } .tools-pin { position: static; height: auto; }
   .t, .bk, .feed, .sky i, .split i { transition: none !important; }
 }

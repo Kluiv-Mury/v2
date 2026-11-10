@@ -317,7 +317,7 @@
       if (live.length >= 12) return setJams(live, "agora");
       return fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, `retrato · ${new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date(s.retrato))}`));
     }).catch(() => fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, "retrato")).catch(() => {}));
-    import("./scene.js?v=202611101135").then(m => {
+    import("./scene.js?v=202611101147").then(m => {
       trip = m.createTrip({ canvas: $("#tripGL"), stations: [...stations.values()], term, geo: window.KMGEO || { cams: [], gauges: [], routes: [] }, layers: lay, mapSrc: "mapa-niteroi.svg", tagEls: tripTags, onFocus: userLayer });
       trip.setBikes(); if (wazePts) trip.setWaze(wazePts); if (jams) paintJams();
       tripTo(tripP);
@@ -364,7 +364,7 @@
   const loadLab = () => {
     if (labOn) return; labOn = true;
     const f = document.createElement("iframe");
-    f.src = "lab.html?v=202611101135"; f.title = "Gêmeo simplificado e pipeline do NitBike";
+    f.src = "lab.html?v=202611101147"; f.title = "Gêmeo simplificado e pipeline do NitBike";
     labFrame.innerHTML = ""; labFrame.appendChild(f);
   };
   addEventListener("load", () => setTimeout(() => idle(loadLab, { timeout: 4000 }), 3200));
@@ -455,7 +455,7 @@
     // mapa de ladrilhos do Brasil (coluna, linha): altura e cor são só ilustração, sem dado real
     saude: `<span class="demo-note">ilustração · sem dados reais</span><div class="d3 d3-uf"><div class="uf-plane">${UFS.map(([u, c, r], i) => {
       const a = 0.22 + ((u.charCodeAt(0) * 7 + u.charCodeAt(1) * 3) % 55) / 100;
-      return `<span class="t" style="grid-column:${c + 1};grid-row:${r};--a:${a.toFixed(2)};--h:${(0.35 + (a - 0.22) * 4.2).toFixed(2)}em;--d:${(0.1 + (c + r) * 0.05 + (i % 3) * 0.03).toFixed(2)}s"><i class="tt">${u}</i><i class="ts"></i><i class="te"></i></span>`;
+      return `<span class="t" style="grid-column:${c + 1};grid-row:${r};--a:${a.toFixed(2)};--h:${(0.35 + (a - 0.22) * 4.2).toFixed(2)}em;--d:${(0.15 + r * 0.085 + c * 0.03).toFixed(3)}s"><i class="tt">${u}</i><i class="ts"></i><i class="te"></i></span>`;
     }).join("")}</div></div>`,
     mocforge: `<span class="demo-note">ilustração</span><div class="mcp"><p class="prompt">monte uma casinha de tijolos vermelhos</p><p class="call">add_parts_batch_tool · ${bricks.length} peças</p><p class="call">render_view_tool · conferindo</p></div>
       <div class="d3 d3-bk"><div class="bk-plane">${bricks.map((b, i) => `<span class="bk${b.roof ? " roof" : ""}" style="--x:${b.x}em;--y:${b.y}em;--z:${(b.r * 1.2).toFixed(1)}em;--w:${b.w}em;--dd:${b.d}em;--d:${(0.5 + i * 0.05).toFixed(2)}s"><i class="bt"></i><i class="bs"></i><i class="bw"></i></span>`).join("")}</div></div>`,
@@ -500,7 +500,7 @@
   const SAY0 = `${D.works.length} trabalhos · ${techs.length} ferramentas · ${D.works.reduce((n, w) => n + w.tech.length, 0)} ligações`;
   graph.innerHTML = `<div class="g-col g-left">${D.works.map((w, i) => `<button type="button" data-w="${w.id}" style="--k:${i};--dx:-14px">${w.label}<i>${w.tech.length}</i></button>`).join("")}</div><div class="g-mid"><svg aria-hidden="true" preserveAspectRatio="none"></svg></div><div class="g-col g-right">${techs.map((t, i) => `<button type="button" data-t="${t}" style="--k:${i};--dx:14px">${t}<i>${uses(t)}</i></button>`).join("")}</div><p class="g-say" id="gSay">${SAY0}</p>`;
   const gsvg = $("svg", graph), gSay = $("#gSay");
-  let gCur = [];
+  let gCur = [], gLinks = [], gAnims = [];
   const drawGraph = () => {
     const box = gsvg.getBoundingClientRect();
     if (!box.width) return;
@@ -509,20 +509,41 @@
     let k = 0;
     gsvg.innerHTML = D.works.flatMap(w => w.tech.map(t => {
       const y1 = yOf($(`button[data-w="${w.id}"]`, graph)), y2 = yOf($(`button[data-t="${CSS.escape(t)}"]`, graph)), x2 = box.width;
-      return `<path class="link" pathLength="1" style="--k:${k++}" data-w="${w.id}" data-t="${t}" d="M0 ${y1.toFixed(1)} C ${(x2 * 0.5).toFixed(1)} ${y1.toFixed(1)}, ${(x2 * 0.5).toFixed(1)} ${y2.toFixed(1)}, ${x2} ${y2.toFixed(1)}"/>`;
+      return `<path class="link" pathLength="1" style="--k:${k++}" data-w="${w.id}" data-t="${t}" data-g="${y1.toFixed(1)},${y2.toFixed(1)},${x2.toFixed(1)}" d="M0 ${y1.toFixed(1)} C ${(x2 * 0.5).toFixed(1)} ${y1.toFixed(1)}, ${(x2 * 0.5).toFixed(1)} ${y2.toFixed(1)}, ${x2} ${y2.toFixed(1)}"/>`;
     })).join("");
+    gLinks = $$(".link", gsvg).map(p => ({ p, g: p.dataset.g.split(",").map(Number) }));
     if (gCur[1]) focusGraph(...gCur);
   };
+  // selecionar um trabalho é uma pequena sequência de causa e efeito: a pílula se enche da esquerda,
+  // cada ligação se desenha do trabalho até a ferramenta com um ponto de luz na frente, e a ferramenta
+  // só acende quando a luz chega nela. Uma seleção nova cancela a anterior no meio, sem acumular
+  const EZ = "cubic-bezier(.65, 0, .35, 1)", POP = "cubic-bezier(.34, 1.56, .64, 1)";
   const focusGraph = (attr, val) => {
     gCur = [attr, val];
     graph.classList.toggle("focus", !!val);
-    $$(".pulse", gsvg).forEach(p => p.remove());
-    // cada ligação acesa ganha um pulso correndo do trabalho para a ferramenta
+    gAnims.forEach(a => a.cancel()); gAnims = [];
+    $$(".comet", gsvg).forEach(p => p.remove());
+    const arr = {};
     let k = 0;
-    $$(".link", gsvg).forEach(p => {
+    gLinks.forEach(({ p }) => {
       const on = !!val && p.getAttribute(`data-${attr}`) === val;
       p.classList.toggle("on", on);
-      if (on && !reduce) { const c = p.cloneNode(); c.setAttribute("class", "pulse"); c.style.setProperty("--k", k++); gsvg.appendChild(c); }
+      if (!on || reduce || !graph.classList.contains("ready")) return;
+      const delay = k++ * 55;
+      gAnims.push(p.animate([{ strokeDashoffset: 1 }, { strokeDashoffset: 0 }], { duration: 640, delay, easing: EZ, fill: "backwards" }));
+      // o ponto de luz: um traço curto que corre a ligação uma vez, com um halo largo e fraco por baixo
+      ["comet halo", "comet"].forEach(cls => {
+        const c = p.cloneNode(); c.setAttribute("class", cls); c.removeAttribute("style"); gsvg.appendChild(c);
+        const an = c.animate([{ strokeDashoffset: 0.07, opacity: 1 }, { strokeDashoffset: -1, opacity: 1 }, { strokeDashoffset: -1, opacity: 0 }], { duration: 760, delay, easing: EZ, fill: "both" });
+        an.onfinish = () => c.remove(); gAnims.push(an);
+      });
+      arr[attr === "w" ? p.dataset.t : p.dataset.w] = delay + 600;
+    });
+    // a ponta que recebe a luz: chega em escala com um leve exagero e só então troca de cor
+    $$(".g-col button", graph).forEach(b => {
+      const key = b.dataset.w ? b.dataset.w : b.dataset.t, at = arr[key];
+      b.style.setProperty("--arr", at != null ? `${at}ms` : "0ms");
+      if (at != null) gAnims.push(b.animate([{ transform: "scale(1)" }, { transform: "scale(1.09)" }, { transform: "scale(1)" }], { duration: 460, delay: at, easing: POP }));
     });
     const ws = val ? D.works.filter(w => attr === "w" ? w.id === val : w.tech.includes(val)) : [];
     const on = new Set(ws.flatMap(w => [`w:${w.id}`, ...(attr === "w" ? w.tech.map(t => `t:${t}`) : [`t:${val}`])]));
@@ -576,58 +597,93 @@
   // pontos espalhados por igual (espiral de Fibonacci); os trabalhos ficam numa faixa, as ferramentas no resto
   // a ordem salta de 11 em 11 para os trabalhos (laranja) não se juntarem num polo só
   const sDir = sEls.map((_, i) => { const q = (i * 11) % NS_, y = 1 - (q + 0.5) / NS_ * 2, r = Math.sqrt(1 - y * y), a = q * GA; return [Math.cos(a) * r, y, Math.sin(a) * r]; });
-  // o contorno e o equador desenham a esfera mesmo onde não há nome
-  sph.insertAdjacentHTML("afterbegin", `<b class="s-rim"></b><b class="s-eq"></b>`);
-  const sRim = $(".s-rim", sph), sEq = $(".s-eq", sph);
-  let sFrom = null, sM = 0, sT = 0, sAng = 0, sRaf = 0, sLast = 0, sR = 200;
+  // o contorno, o equador, o núcleo (onde as linhas são sugadas) e o halo da bola de luz
+  sph.insertAdjacentHTML("afterbegin", `<b class="s-halo"></b><b class="s-rim"></b><b class="s-eq"></b><b class="s-core"></b>`);
+  const sRim = $(".s-rim", sph), sEq = $(".s-eq", sph), sCore = $(".s-core", sph), sHalo = $(".s-halo", sph);
+  let sFrom = null, sM = 0, sT = 0, sL = 0, sLT = 0, sAng = 0, sRaf = 0, sLast = 0, sR = 200, sC = [0, 0];
   const sMeasure = () => {
     const g = graph.getBoundingClientRect(), sc = g.width / graph.offsetWidth || 1;
     sR = wide() ? Math.min(graph.offsetWidth * 0.36, graph.offsetHeight * 0.4) : Math.min(graph.offsetWidth * 0.36, graph.offsetHeight * 0.42);
-    [sRim, sEq].forEach(el => { el.style.width = el.style.height = `${(sR * 2).toFixed(0)}px`; });
+    [sRim, sEq, sCore].forEach(el => { el.style.width = el.style.height = `${(sR * 2).toFixed(0)}px`; });
+    sHalo.style.width = sHalo.style.height = `${(sR * 3.4).toFixed(0)}px`;
     // posição de partida: o centro de cada botão, medido a partir da origem da esfera (e não do centro do grafo)
-    const o = sph.getBoundingClientRect();
+    const o = sph.getBoundingClientRect(), sv = gsvg.getBoundingClientRect();
     sFrom = sBtns.map((b, i) => { const r = b.getBoundingClientRect(); sEls[i].style.width = `${b.offsetWidth}px`; return [(r.left + r.width / 2 - o.left) / sc, (r.top + r.height / 2 - o.top) / sc]; });
+    // o centro da esfera no sistema de coordenadas das linhas
+    const vb = gsvg.viewBox.baseVal, kx = vb && vb.width ? vb.width / sv.width : 1, ky = vb && vb.height ? vb.height / sv.height : 1;
+    sC = [(o.left - sv.left) * kx, (o.top - sv.top) * ky];
   };
   const ease = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  const cl = v => Math.min(1, Math.max(0, v));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  // as linhas não somem: cada uma encolhe até o centro, primeiro perdendo a curva (vira um fio esticado)
+  // e depois as duas pontas correm para o núcleo, onde a esfera vai nascer
+  const pullLines = m => {
+    const n = gLinks.length, [cx0, cy0] = sC;
+    gLinks.forEach(({ p, g: [y1, y2, x2] }, k) => {
+      const e = ease(cl((m - (k / n) * 0.08) / 0.3)), ec = Math.pow(e, 0.55);
+      const ax = lerp(0, cx0, e), ay = lerp(y1, cy0, e), dx = lerp(x2, cx0, e), dy = lerp(y2, cy0, e);
+      const bx = lerp(x2 * 0.5, cx0, ec), by = lerp(y1, cy0, ec), cx1 = lerp(x2 * 0.5, cx0, ec), cy1 = lerp(y2, cy0, ec);
+      p.setAttribute("d", `M${ax.toFixed(1)} ${ay.toFixed(1)} C ${bx.toFixed(1)} ${by.toFixed(1)}, ${cx1.toFixed(1)} ${cy1.toFixed(1)}, ${dx.toFixed(1)} ${dy.toFixed(1)}`);
+      p.style.opacity = (1 - ss(0.7, 1, e)).toFixed(3);
+    });
+  };
   const sDraw = now => {
     const dt = sLast ? Math.min(0.05, (now - sLast) / 1000) : 0; sLast = now;
-    // amortecimento: a rolagem só marca o alvo (sT); a transformação anda até ele no próprio ritmo
-    sM += (sT - sM) * (1 - Math.exp(-dt * 3.2));
-    if (Math.abs(sT - sM) < 0.0008) sM = sT;
+    // amortecimento: a rolagem só marca os alvos (sT, sLT); a transformação anda até eles no próprio ritmo
+    const kd = 1 - Math.exp(-dt * 3.2);
+    sM += (sT - sM) * kd; if (Math.abs(sT - sM) < 0.0008) sM = sT;
+    sL += (sLT - sL) * kd; if (Math.abs(sLT - sL) < 0.0008) sL = sLT;
+    const was = graph.classList.contains("morph");
     graph.classList.toggle("morph", sM > 0);
-    gSvg.style.opacity = sM > 0 ? (1 - ss(0, 0.2, sM)).toFixed(3) : "";
-    if (sM <= 0 && sT <= 0) { cancelAnimationFrame(sRaf); sRaf = 0; sFrom = null; return false; }
-    sAng += dt * 0.32 * ss(0.25, 0.6, sM);
-    const ca = Math.cos(sAng), sa = Math.sin(sAng), tx = 0.32, cx = Math.cos(tx), sx = Math.sin(tx);
-    // três tempos: as linhas somem (até 0,2); os nomes entram numa órbita (o equador da esfera, já girando);
-    // a órbita se abre e vira a esfera. Tudo é a mesma rotação, então não há salto entre um tempo e outro
+    if (sM <= 0 && sT <= 0) {
+      cancelAnimationFrame(sRaf); sRaf = 0; sFrom = null;
+      if (was) { gLinks.forEach(({ p }) => { p.style.opacity = ""; }); drawGraph(); }
+      return false;
+    }
+    pullLines(sM);
+    // giro: devagar na esfera; na bola de luz cada rolada acelera, até virar um borrão
+    sAng += dt * (0.32 * ss(0.25, 0.6, sM) + 9 * sL * sL);
+    const ca = Math.cos(sAng), sa = Math.sin(sAng), tx = 0.32;
+    const shrink = 1 - 0.9 * ease(sL), fade = 1 - ss(0.15, 0.75, sL);
+    // três tempos: os nomes entram numa órbita (o equador da esfera, já girando); a órbita se abre e vira
+    // a esfera; e, rolando mais, a esfera gira cada vez mais rápido e se fecha numa bola de luz
     for (let i = 0; i < NS_; i++) {
       const d = i / NS_ * 0.06;
-      const e1 = ease(Math.min(1, Math.max(0, (sM - 0.2 - d) / 0.38)));
-      const e2 = ease(Math.min(1, Math.max(0, (sM - 0.6 - d) / 0.34)));
+      const e1 = ease(cl((sM - 0.18 - d) / 0.4));
+      const e2 = ease(cl((sM - 0.6 - d) / 0.34));
       // na órbita a ordem também salta de 11 em 11, para os trabalhos (laranja) ficarem espalhados no anel
       const th = ((i * 11) % NS_) / NS_ * Math.PI * 2, [sx0, sy0, sz0] = sDir[i];
       const dx = Math.cos(th) + (sx0 - Math.cos(th)) * e2, dy = sy0 * e2, dz = Math.sin(th) + (sz0 - Math.sin(th)) * e2;
       // a órbita é vista quase de cima (um anel aberto, os nomes não se amontoam) e maior; ao virar esfera,
       // ela se inclina até o ângulo final e encolhe para o raio da esfera
-      const tl = 1.05 + (tx - 1.05) * e2, ctl = Math.cos(tl), stl = Math.sin(tl), rr = sR * (1 + (wide() ? 0.18 : 0.04) * (1 - e2));
+      const tl = 1.05 + (tx - 1.05) * e2, ctl = Math.cos(tl), stl = Math.sin(tl);
+      const rr = sR * (1 + (wide() ? 0.18 : 0.04) * (1 - e2)) * shrink;
       let x = dx * ca + dz * sa, z = -dx * sa + dz * ca, y = dy;
       const y2 = y * ctl - z * stl, z2 = y * stl + z * ctl;
       const pz = z2 * rr * e1, k = 1100 / (1100 - pz);
       const px = (sFrom[i][0] + (x * rr - sFrom[i][0]) * e1) * k, py = (sFrom[i][1] + (y2 * rr - sFrom[i][1]) * e1) * k;
-      sEls[i].style.transform = `translate3d(${px.toFixed(1)}px, ${py.toFixed(1)}px, 0) translate(-50%, -50%) scale(${(1 + (k - 1) * e1).toFixed(3)})`;
-      sEls[i].style.opacity = (1 - e1 * (0.62 - 0.62 * (z2 + 1) / 2)).toFixed(3);
+      const sc2 = (1 + (k - 1) * e1) * (1 - 0.55 * sL);
+      sEls[i].style.transform = `translate3d(${px.toFixed(1)}px, ${py.toFixed(1)}px, 0) translate(-50%, -50%) scale(${sc2.toFixed(3)})`;
+      sEls[i].style.opacity = ((1 - e1 * (0.62 - 0.62 * (z2 + 1) / 2)) * fade).toFixed(3);
       sPill[i].style.opacity = sNum[i].style.opacity = (1 - e1).toFixed(3);
       sEls[i].classList.toggle("lit", e1 > 0.5);
     }
-    const o = ss(0.45, 0.9, sM).toFixed(3);
-    sRim.style.opacity = o; sEq.style.opacity = o;
+    const o = ss(0.45, 0.9, sM) * (1 - ss(0, 0.5, sL));
+    sRim.style.opacity = o.toFixed(3); sEq.style.opacity = o.toFixed(3);
     sEq.style.transform = `translate(-50%, -50%) scaleY(.31) rotate(${(sAng * 57.3).toFixed(1)}deg)`;
+    // o núcleo: um ponto que acende quando as linhas chegam, respira com a esfera e explode em luz no fim
+    const seed = ss(0.12, 0.32, sM) * (1 - ss(0.5, 0.9, sM) * 0.6);
+    const cs = 0.06 + 0.12 * seed + 0.1 * ss(0.6, 1, sM) + 0.62 * ease(sL);
+    sCore.style.opacity = Math.max(seed, ss(0.55, 1, sM) * 0.55, ss(0, 0.35, sL)).toFixed(3);
+    sCore.style.transform = `translate(-50%, -50%) scale(${cs.toFixed(3)})`;
+    sHalo.style.opacity = (ss(0.25, 1, sL) * (0.85 + 0.15 * Math.sin(now / 260))).toFixed(3);
+    sHalo.style.transform = `translate(-50%, -50%) scale(${(0.5 + 0.32 * ease(sL)).toFixed(3)})`;
   };
   const sLoop = now => { sRaf = requestAnimationFrame(sLoop); sDraw(now); };
-  const sphereTo = m => {
+  const sphereTo = (m, l) => {
     if (m > 0 && !sFrom) sMeasure();
-    sT = m;
+    sT = m; sLT = l;
     if (m > 0 && !sRaf) { sLast = 0; sRaf = requestAnimationFrame(sLoop); }
   };
   let toolsAt = -2, toolsST = null;
@@ -636,15 +692,16 @@
     if (attr !== "w" || !toolsST || !toolsST.isActive) return;
     const k = D.works.findIndex(w => w.id === val), n = D.works.length;
     if (k < 0 || k === toolsAt) return;
-    toolsAt = k; jumpTo(toolsST.start + (toolsST.end - toolsST.start) * (0.04 + (k + 0.5) / n * 0.4));
+    toolsAt = k; jumpTo(toolsST.start + (toolsST.end - toolsST.start) * (0.03 + (k + 0.5) / n * 0.3));
   }
   const toolsTo = p => {
     // primeiro a rolagem passa por cada trabalho, de cima para baixo; depois os nomes viram a esfera
-    const t = (p - 0.04) / 0.4, n = D.works.length;
+    // 0,03–0,33 passeio pelos trabalhos · 0,34–0,58 linhas e globo · 0,60–0,80 bola de luz · 0,81–1 contato por cima
+    const t = (p - 0.03) / 0.3, n = D.works.length;
     const k = t < 0 || t >= 1 || !graph.classList.contains("ready") ? -1 : Math.floor(t * n);
     if (k !== toolsAt) { toolsAt = k; focusGraph("w", k < 0 ? null : D.works[k].id); }
     // a esfera se forma e fica parada no lugar; a última tela da seção é o contato subindo por cima dela
-    sphereTo(Math.min(1, Math.max(0, (p - 0.45) / 0.3)));
+    sphereTo(Math.min(1, Math.max(0, (p - 0.34) / 0.24)), Math.min(1, Math.max(0, (p - 0.6) / 0.2)));
   };
 
   /* ---------- 08 · contato ---------- */
@@ -685,8 +742,8 @@
   // 08: o grafo fica grudado; a rolagem passeia pelos trabalhos e termina na esfera
   graphFit(); addEventListener("resize", () => { graphFit(); sFrom = null; if (sM > 0) sMeasure(); });
   document.fonts && document.fonts.ready.then(graphFit);
-  // preso de verdade (fixed) por 3,8 telas: as últimas 0,26 são o contato subindo por cima da esfera parada
-  toolsST = ScrollTrigger.create({ trigger: ".tools-pin", start: "top top", end: "+=380%", pin: true, pinSpacing: true, anticipatePin: 1, onUpdate: s => toolsTo(s.progress) });
+  // preso de verdade (fixed) por 5,2 telas: a última delas é o contato subindo por cima da bola de luz
+  toolsST = ScrollTrigger.create({ trigger: ".tools-pin", start: "top top", end: "+=520%", pin: true, pinSpacing: true, anticipatePin: 1, onUpdate: s => toolsTo(s.progress) });
 
   const mm = gsap.matchMedia();
   mm.add({ wide: "(min-width: 861px)", narrow: "(max-width: 860px)" }, ctx => {
