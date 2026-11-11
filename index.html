@@ -13,15 +13,44 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..800&family=Geist:wght@300..700&family=Geist+Mono:wght@400..600&family=Newsreader:ital,opsz,wght@1,6..72,400..500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="v5.css?v=202611110225" />
+  <link rel="stylesheet" href="v5.css?v=202611110340" />
   <link rel="preload" as="image" href="mapa-niteroi.svg" />
+  <!-- entrada da abertura: html.pre esconde o que vai entrar e html.go toca quando as fontes do título chegam
+       (ou em 1,4 s, o que vier antes). Sem JS ou com movimento reduzido, nada fica escondido. -->
+  <script>
+    (function (d) {
+      var r = d.documentElement;
+      if (!r.animate || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      r.classList.add("pre");
+      var on = false;
+      var go = function () {
+        if (on) return;
+        // aba aberta em segundo plano: a entrada espera a pessoa chegar
+        if (d.hidden) { d.addEventListener("visibilitychange", go, { once: true }); return; }
+        on = true;
+        r.classList.add("go");
+        d.dispatchEvent(new Event("hero:go"));
+        setTimeout(function () { r.classList.remove("pre", "go"); }, 3200);
+      };
+      setTimeout(go, 1400);
+      try { Promise.all([d.fonts.load('800 1em "Bricolage Grotesque"'), d.fonts.load('italic 400 1em "Newsreader"')]).then(go, go); } catch (e) { go(); }
+    })(document);
+  </script>
 </head>
 <body>
   <a class="skip" href="#quem">Pular para o conteúdo</a>
 
   <header class="bar" id="bar">
-    <a class="bar-mark" href="#topo" data-go="topo" aria-label="Kluivert Mury, início"><span>KM</span><b>Kluivert Mury</b></a>
-    <div class="bar-chapter" aria-hidden="true"><span id="chap-n">00</span><span id="chap-t">Abertura</span></div>
+    <div class="bar-start">
+      <a class="bar-mark" href="#topo" data-go="topo" aria-label="Kluivert Mury, início"><span>KM</span><b>Kluivert Mury</b></a>
+      <div class="bar-chapter" aria-hidden="true"><span id="chap-n">00</span><span id="chap-t">Abertura</span></div>
+    </div>
+    <nav class="bar-nav" aria-label="Seções">
+      <a href="#projetos" data-go="projetos" data-nav="projetos">Projetos</a>
+      <a href="#caminho" data-go="caminho" data-nav="case">Case NitBike</a>
+      <a href="#trajetoria" data-go="trajetoria" data-nav="trajetoria">Trajetória</a>
+      <a href="#contato" data-go="contato" data-nav="contato">Contato</a>
+    </nav>
     <div class="bar-end">
       <span class="bar-clock" id="clock" aria-label="Hora em Niterói">--:--</span>
       <a class="pill pill-ink" href="mailto:kluivert.mury@gmail.com">Fale comigo</a>
@@ -40,12 +69,14 @@
         <div class="hero-shade" aria-hidden="true"></div>
         <div class="hero-copy">
           <p class="eyebrow hero-live" id="heroLive"><svg class="orb" width="16" height="16" aria-hidden="true"></svg><span>ao vivo · lendo as estações do NitBike…</span></p>
-          <h1 class="hero-name" id="hero-name"><span class="ln"><span>Kluivert</span></span><span class="ln"><span>Mury</span></span></h1>
+          <p class="hero-id"><b>Kluivert Mury</b><span>Escritório de Dados · Prefeitura de Niterói</span></p>
+          <h1 class="hero-head" id="hero-name"><span class="ln" style="--i:0"><span>Dados da cidade,</span></span><span class="ln" style="--i:1"><span>do feed ao mapa.</span></span><span class="ln hero-pun"><span><em>E agentes de IA em Python.</em></span></span></h1>
           <div class="hero-foot">
-            <p class="hero-lead">Desenvolvo em Python e levo os dados da cidade <em>para o mapa</em>. Cada ponto aqui é uma estação do NitBike, lida agora na camada pública que eu ajudo a alimentar.</p>
+            <p class="hero-lead">Sou desenvolvedor Python de backend e dados. Cada ponto aqui é uma estação do NitBike, lida agora na camada pública que eu ajudo a alimentar.</p>
             <div class="hero-act">
-              <a class="pill pill-accent" href="#caminho" data-go="caminho">Seguir o dado <span aria-hidden="true">↓</span></a>
-              <a class="pill pill-line" href="#projetos" data-go="projetos">Projetos</a>
+              <a class="pill pill-accent" href="#caminho" data-go="caminho">Ver o case NitBike <span aria-hidden="true">↓</span></a>
+              <a class="pill pill-line" href="cv.pdf" target="_blank" rel="noopener noreferrer">Baixar CV</a>
+              <a class="pill pill-line" href="https://www.linkedin.com/in/kluivertmury" target="_blank" rel="noopener noreferrer">LinkedIn <span aria-hidden="true">↗</span></a>
             </div>
           </div>
         </div>
@@ -194,7 +225,7 @@
   <script src="https://unpkg.com/lenis@1.1.13/dist/lenis.min.js"></script>
   <script src="data.js?v=202611110225"></script>
   <script src="geo.js?v=202611110225"></script>
-  <script src="v5.js?v=202611110225"></script>
+  <script src="v5.js?v=202611110340"></script>
 </body>
 </html>
 

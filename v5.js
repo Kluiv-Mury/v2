@@ -57,10 +57,15 @@
   const tickClock = () => { clock.textContent = `Niterói ${hhmm()}`; };
   tickClock(); setInterval(tickClock, 15000);
   const bar = $("#bar"), chapN = $("#chap-n"), chapT = $("#chap-t"), progress = $("#progress");
+  // os capítulos do case (caminho, pipeline e laboratório) acendem o mesmo item da navegação
+  const navOf = { caminho: "case", pipeline: "case", lab: "case", trajetoria: "trajetoria", projetos: "projetos", contato: "contato" };
+  const navLinks = $$("[data-nav]");
   const chapIO = new IntersectionObserver(es => es.forEach(e => {
     if (!e.isIntersecting) return;
     chapN.textContent = e.target.dataset.chap; chapT.textContent = e.target.dataset.title;
     bar.classList.toggle("named", e.target.id !== "topo");
+    const cur = navOf[e.target.id];
+    navLinks.forEach(a => { if (a.dataset.nav === cur) a.setAttribute("aria-current", "true"); else a.removeAttribute("aria-current"); });
   }), { rootMargin: "-45% 0px -54% 0px" });
   $$("[data-chap]").forEach(s => chapIO.observe(s));
 
@@ -93,6 +98,14 @@
     g.addEventListener("pointerleave", hide); g.addEventListener("blur", hide);
   });
   svg.insertAdjacentHTML("beforebegin", `<div class="hero-pings" aria-hidden="true">${pings.join("")}</div>`);
+  // entrada: as estações acendem em onda a partir do Terminal. O atraso de cada uma vem da distância;
+  // o expoente menor que 1 aperta o fim, para as estações distantes não ficarem esperando
+  {
+    const o = stations.get(4) || [...stations.values()][0];
+    let far = 1;
+    stations.forEach(s => { s.d = Math.hypot(s.x - o.x, s.y - o.y); far = Math.max(far, s.d); });
+    stations.forEach(s => nodes.get(s.n).style.setProperty("--d", `${Math.round(180 + 900 * Math.pow(s.d / far, 0.7))}ms`));
+  }
   const sizeStations = () => stations.forEach(s => {
     const g = nodes.get(s.n), fill = s.bikes == null ? 0.5 : Math.min(1, s.bikes / Math.max(1, s.cap));
     const r = 2.2 + fill * 4.2;
@@ -129,10 +142,10 @@
 
   // câmera: no começo a rede inteira à direita do nome; ao rolar, desce até o Terminal (estação 4), no Centro
   const term = stations.get(4) || [...stations.values()][0];
-  let Z1 = 2.6;
+  let Z1 = 2.6, camM = 1;   // camM: na entrada a câmera começa um pouco mais perto e assenta
   const camera = p => {
     const vw = innerWidth, vh = innerHeight, mob = !wide();
-    const zA = mob ? 0.95 : Math.max(1.1, Math.min(1.75, vw / 900)), zB = mob ? 2.1 : 2.6;
+    const zA = (mob ? 0.95 : Math.max(1.1, Math.min(1.75, vw / 900))) * camM, zB = mob ? 2.1 : 2.6;
     const ax = mob ? 0.62 : 0.66, ay = mob ? 0.34 : 0.42;
     const A = { x: vw * ax - 450 * zA, y: vh * ay - 430 * zA, z: zA };
     const B = { x: vw * 0.5 - term.x * zB, y: vh * 0.42 - term.y * zB, z: zB };
@@ -1161,10 +1174,15 @@
   // progresso geral da página na barra (transform, sem layout)
   ScrollTrigger.create({ start: 0, end: "max", onUpdate: s => { progress.style.transform = `scaleX(${s.progress.toFixed(4)})`; } });
 
-  // entrada da abertura: o nome sobe por linha; o resto chega junto, um passo atrás
-  gsap.from(".hero-name .ln > span", { yPercent: 110, duration: 1.3, ease: "expo.out", stagger: 0.12, delay: 0.15 });
-  gsap.from([".hero-live", ".hero-foot"], { y: 16, opacity: 0, duration: 1, ease: "expo.out", stagger: 0.08, delay: 0.5 });
-  gsap.from(".hero-st", { opacity: 0, duration: 1.6, ease: "power2.out", delay: 0.2 });
+  // entrada da abertura: o texto e as estações entram por CSS (html.pre → html.go, no index.html e no v5.css).
+  // Aqui só a câmera assenta sobre a rede; como ela lê heroP a cada quadro, rolar no meio não quebra nada
+  const root = document.documentElement;
+  if (root.classList.contains("pre")) {
+    const cam = { m: 1.07 };
+    camM = cam.m; camera(heroP);
+    const settle = () => gsap.to(cam, { m: 1, duration: 2.4, ease: "expo.out", onUpdate: () => { camM = cam.m; camera(heroP); } });
+    if (root.classList.contains("go")) settle(); else document.addEventListener("hero:go", settle, { once: true });
+  }
 
   // 00: a câmera desce até o Centro enquanto a abertura fica grudada; o texto sai antes
   ScrollTrigger.create({ trigger: ".hero", start: "top top", end: "bottom bottom", onUpdate: s => { heroP = s.progress; camera(heroP); } });
