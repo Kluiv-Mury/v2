@@ -12,14 +12,16 @@
   if (hasGsap) gsap.registerPlugin(ScrollTrigger);
   // indicadores de estado: os Thinking Orbs (cópia local, sem dependências) dizem o que cada parte está
   // fazendo agora. Trocar de estado apaga o orb, troca e acende de novo, para não haver corte seco
-  const orbsLib = import("./orbs.js?v=202611101710").catch(() => null);
+  const orbsLib = import("./orbs.js?v=202611110225").catch(() => null);
   const orb = (svg, o) => {
-    let cur = null, gen = 0;
+    let cur = null, gen = 0, seen = false;
+    // fora da tela o orb para de vez (a biblioteca só deixa de desenhar, mas o laço continuava)
+    new IntersectionObserver(([e]) => { seen = e.isIntersecting; if (cur) cur[seen ? "play" : "pause"](); }).observe(svg);
     const set = (opts, hint) => {
       const g = ++gen;
       orbsLib.then(m => {
         if (!m || g !== gen) return;
-        const swap = () => { if (g !== gen) return; if (cur) cur.destroy(); cur = m.mountOrb(svg, { size: 16, ...opts }); svg.classList.remove("swap"); svg.dataset.s = hint || ""; };
+        const swap = () => { if (g !== gen) return; if (cur) cur.destroy(); cur = m.mountOrb(svg, { size: 16, density: 0.7, ...opts }); if (!seen) cur.pause(); svg.classList.remove("swap"); svg.dataset.s = hint || ""; };
         if (!cur) return swap();
         svg.classList.add("swap"); setTimeout(swap, 180);
       });
@@ -68,15 +70,16 @@
   const stations = new Map(D.stations.map(([n, name, lon, lat, cap]) => [n, { n, name, lon, lat, cap, bikes: null, free: null }]));
   const svg = $("#heroSt"), tip = $("#heroTip"), mapEl = $("#heroMap");
   const NS = "http://www.w3.org/2000/svg";
-  const nodes = new Map();
+  const nodes = new Map(), pings = [];
   let k = 0;
   stations.forEach(s => {
     const [x, y] = toMap(s.lon, s.lat);
     s.x = x; s.y = y;
     const g = document.createElementNS(NS, "g");
-    // só algumas estações pulsam: cada anel animado repinta a camada do mapa
-    const ring = k++ % 8 === 0 ? `<circle class="ring" cx="${x}" cy="${y}" r="6" style="--d:${(k % 5) * 0.7}s"/>` : `<circle class="ring" cx="${x}" cy="${y}" r="0"/>`;
-    g.innerHTML = `<circle class="halo" cx="${x}" cy="${y}" r="9"/>${ring}<circle cx="${x}" cy="${y}" r="3.2"/>`;
+    // 1 em cada 8 estações pulsa. O anel é um elemento HTML por cima do mapa (não um círculo do SVG):
+    // assim a animação roda na GPU e o mapa não repinta a cada quadro
+    if (k++ % 8 === 0) pings.push(`<i style="left:${(x / GEO.w * 100).toFixed(3)}%;top:${(y / GEO.h * 100).toFixed(3)}%;--d:${(k % 5) * 0.7}s"></i>`);
+    g.innerHTML = `<circle class="halo" cx="${x}" cy="${y}" r="9"/><circle cx="${x}" cy="${y}" r="3.2"/>`;
     svg.appendChild(g);
     nodes.set(s.n, g);
     const show = () => {
@@ -89,15 +92,17 @@
     g.addEventListener("pointerenter", show); g.addEventListener("focus", show);
     g.addEventListener("pointerleave", hide); g.addEventListener("blur", hide);
   });
+  svg.insertAdjacentHTML("beforebegin", `<div class="hero-pings" aria-hidden="true">${pings.join("")}</div>`);
   const sizeStations = () => stations.forEach(s => {
     const g = nodes.get(s.n), fill = s.bikes == null ? 0.5 : Math.min(1, s.bikes / Math.max(1, s.cap));
     const r = 2.2 + fill * 4.2;
-    g.children[2].setAttribute("r", r.toFixed(1));
-    g.children[0].setAttribute("r", (r + 5).toFixed(1));
+    // o ponto é sempre o último filho e o halo, o primeiro (o anel só existe em 1 de cada 8)
+    g.lastElementChild.setAttribute("r", r.toFixed(1));
+    g.firstElementChild.setAttribute("r", (r + 5).toFixed(1));
   });
   sizeStations();
   // os anéis param quando a abertura sai da tela
-  new IntersectionObserver(([e]) => svg.classList.toggle("still", !e.isIntersecting)).observe($(".hero"));
+  new IntersectionObserver(([e]) => mapEl.classList.toggle("still", !e.isIntersecting)).observe($(".hero"));
 
   const live = $("#heroLive span");
   // procurando enquanto lê a camada do NitBike; parado e verde quando a leitura chega
@@ -194,7 +199,7 @@
         <span class="k">for</span> e <span class="k">in</span> estacoes  <span class="c"># 65</span>
     ]</pre>` },
     { t: "Banco", k: "PostgreSQL · janela de 5 min", h: `A janela de <em>5 minutos.</em>`,
-      p: `A cada minuto, aos :30, a publicação lê a <strong>janela dos últimos 5 min</strong> (30 snapshots) e compara: subiu, entraram bikes; caiu, saíram. Os 30 s mais recentes ficam para a próxima. O que já saiu da janela é apagado.`,
+      p: `Uma vez por minuto, a publicação lê a <strong>janela dos últimos 5 min</strong> (30 snapshots) e compara: subiu, entraram bikes; caiu, saíram. Os 30 s mais recentes ficam para a próxima. O que já saiu da janela é apagado.`,
       hud: `<div class="key"><span class="k-old">apagados</span><span class="k-win">na janela</span><span class="k-new">últimos 30 s</span></div>` },
     { t: "Camada", k: "ArcGIS · 1 por minuto", h: `Coordenadas que o mapa <em>entende.</em>`,
       p: `Antes de gravar no ArcGIS, cada ponto sai de latitude e longitude para <strong>SIRGAS 2000 / UTM 23S</strong> (EPSG 31983). A camada guarda entradas, saídas, fluxo e o ranking de cada estação. O pico do dia só é regravado quando o total passa dele, e reinicia quando o dia vira.`,
@@ -337,7 +342,7 @@
       if (live.length >= 12) return setJams(live, "agora");
       return fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, `retrato · ${new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date(s.retrato))}`));
     }).catch(() => fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, "retrato")).catch(() => {}));
-    import("./scene.js?v=202611101710").then(m => {
+    import("./scene.js?v=202611110225").then(m => {
       trip = m.createTrip({ canvas: $("#tripGL"), stations: [...stations.values()], term, geo: window.KMGEO || { cams: [], gauges: [], routes: [] }, layers: lay, mapSrc: "mapa-niteroi.svg", tagEls: tripTags, onFocus: userLayer });
       trip.setBikes(); if (wazePts) trip.setWaze(wazePts); if (jams) paintJams();
       tripTo(tripP);
@@ -357,10 +362,207 @@
     new IntersectionObserver(([e]) => { tripVisible = tripSeen = e.isIntersecting; if (trip) trip[tripVisible ? "start" : "stop"](); }).observe(tripStage);
   }
 
+  /* ---------- 04 · pipeline: do snapshot à camada ---------- */
+  // o fluxograma dos dois flows em cima; embaixo, o banco em 3D com a janela de 5 min deslizando.
+  // A rolagem passa pelos nove passos; o relógio da simulação anda sozinho (1 s vale 10 s)
+  const pipeEl = $(".pipe"), pipeRun = $("#pipeRun"), pipeStage = $("#pipeStage"), pf = $("#pipeFlow");
+  // cada linha do fluxograma tem a sua legenda, em palavras simples
+  const NODES = {
+    api: [0, 40, "API NitBike", "bikes e vagas", "ant"], coleta: [212, 40, "Coleta", "a cada 10 s", "hatch", 1],
+    pg: [424, 40, "PostgreSQL", "o banco", "db", 2], pub: [660, 40, "Publicação", "a cada minuto", "hatch", 3],
+    agol: [892, 40, "ArcGIS", "camada NitBike", "layers", 4], gem: [1116, 40, "Gêmeo", "mapa da cidade", "layers", 5],
+    total: [424, 212, "Total e pico", "soma as bikes", "hatch"],
+  };
+  const EDGES = {
+    "api-coleta": ["M124 73H212", "lê a cada|10 s", 168, 64], "coleta-pg": ["M336 73H424", "grava|65 linhas", 380, 64],
+    "pg-pub": ["M548 73H660", "lê os últimos|5 min", 604, 64], "pub-agol": ["M784 73H892", "atualiza|a camada", 838, 64],
+    "agol-gem": ["M1016 73H1116", "mostra|no mapa", 1066, 64],
+    "api-total": ["M62 106V245H424", "conta as bikes paradas", 243, 236], "total-pub": ["M548 245H722V106", "devolve o total", 635, 236],
+    "total-agol": ["M486 278V300H954V106", "guarda o maior total do dia (o pico)", 720, 292, 1],
+    "pub-pg": ["M722 40V14H486V40", "apaga o que ficou antes da janela", 604, 8, 1],
+  };
+  const ICON = {
+    ant: '<path d="M8 12a4 4 0 0 1 8 0M5 12a7 7 0 0 1 14 0"/><circle cx="12" cy="12" r="1.4"/>',
+    hatch: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 14 14 4M8 20 20 8M14 20l6-6"/>',
+    db: '<ellipse cx="12" cy="6" rx="7" ry="2.6"/><path d="M5 6v12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6M5 12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6"/>',
+    layers: '<path d="m12 4 8 4-8 4-8-4 8-4ZM4 12l8 4 8-4M4 16l8 4 8-4"/>',
+  };
+  // cada ligação tem o seu pacote: um ponto que corre o traço (animateMotion) quando o fluxo passa por ali
+  pf.innerHTML = `<svg viewBox="0 0 1240 310" class="pf-lines">${Object.entries(EDGES).map(([k, [d, t, x, y, dash]]) =>
+      `<path class="pf-e${dash ? " dash" : ""}" data-e="${k}" id="pe-${k}" d="${d}"/>${t ? `<text class="pf-t" data-e="${k}" x="${x}" y="${y}">${t.split("|").map((l, i, a) => `<tspan x="${x}" dy="${i ? 12 : -(a.length - 1) * 12}">${l}</tspan>`).join("")}</text>` : ""}`).join("")}
+      ${Object.keys(EDGES).map(k => `<g class="pf-pk" data-pk="${k}"><circle r="7" class="pf-pk-h"/><circle r="3"/><animateMotion begin="indefinite" dur="0.25s" fill="freeze" calcMode="spline" keyTimes="0;1" keySplines=".45 0 .25 1"><mpath href="#pe-${k}"/></animateMotion></g>`).join("")}</svg>` +
+    Object.entries(NODES).map(([k, [x, y, t, s, ic, n]]) => `<div class="pf-n" data-n="${k}" style="left:${x}px;top:${y}px">
+      <svg viewBox="0 0 24 24">${ICON[ic]}</svg><b>${t}</b><small>${s}</small>${n ? `<i>${n}</i>` : ""}</div>`).join("");
+  // a câmera fica parada no mesmo enquadramento em todos os passos (trocar a cada passo cansava a vista)
+  const STEPS = [
+    { t: "Como ler", k: "dois flows, um passo de cada vez", p: "A coleta (1 → 2) tira uma foto das 65 estações a cada 10 s; a publicação (3 → 4 → 5) junta as fotos dos últimos minutos e atualiza o mapa, uma vez por minuto. Cada ficha do bloco é uma foto; cada quadradinho, uma estação (mais clara, mais cheia). Mude a velocidade em 1×, 5× ou 10×.",
+      n: Object.keys(NODES), e: [], stats: true, pose: 0, look: { delta: 0.5 } },
+    { t: "Coleta", k: "nitbike_snapshot_flow", p: "A cada 10 s: autentica na API, busca as 65 estações e grava uma linha por estação na tabela nitbike_snapshot, com a hora da coleta. Sem nova tentativa: se falha, aquele snapshot fica faltando.",
+      n: ["api", "coleta", "pg"], e: ["api-coleta", "coleta-pg"], pose: 0, look: { delta: 0.3 }, log: () => [["nitbike_snapshot_flow", "INFO", "65 estações gravadas · {agora}"]] },
+    { t: "PostgreSQL", k: "nitbike_snapshot", p: "Guarda os snapshots até a publicação usá-los. A fila anda sozinha: o novo entra no “agora”, os antigos vão ficando para trás até a limpeza.",
+      n: ["pg"], e: ["coleta-pg"], pose: 0, look: { delta: 0.4 }, log: () => [["nitbike_snapshot", "", `${pipeRows} snapshots no banco · ${fmt(pipeRows * 65)} linhas`]] },
+    { t: "Publicação", k: "nitbike_flow_arcgis", p: "Uma vez por minuto, a publicação lê os últimos 5 minutos do banco: 30 fotos de uma vez, a janela laranja. As fotos dos últimos 30 segundos ficam de fora, porque ainda podem estar sendo gravadas. As que acabaram de entrar na janela acendem.",
+      n: ["pg", "pub"], e: ["pg-pub"], pose: 0, look: { delta: 0.6 }, log: () => [["nitbike_flow_arcgis", "INFO", "Janela de processamento configurada: 5 minutos (lag de segurança: 30 segundos) · {de} → {ate}"], ["próxima publicação", "", `em ${pipeNext} s`]] },
+    { t: "Total e pico", k: "nitbike_total_bikes_flow", p: "Subflow chamado no começo de cada publicação. Soma as bikes paradas nas estações e compara com o pico guardado na camada. Só troca o pico quando o total passa dele, o que acontece de madrugada.",
+      n: ["api", "total", "pub", "agol"], e: ["api-total", "total-pub", "total-agol"], pose: 0, look: { delta: 0.4 }, big: true, log: () => [["total_bikes", "INFO", `Novo valor (${lastRead ? fmt(lastRead.bikes) : "—"}) não é maior que o atual. Não atualizando.`]] },
+    { t: "Entradas, saídas e fluxo", k: "calculate_flow", p: "A publicação compara cada snapshot da janela com o seguinte: se a contagem sobe, entraram bikes; se cai, saíram. Fluxo é a soma, e os rankings ordenam as estações por entradas, saídas e fluxo.",
+      n: ["pg", "pub"], e: ["pg-pub"], pose: 0, look: { delta: 1 }, log: () => [["load_snapshots", "INFO", "[Snapshots] Total: 1950 | Estações únicas: 65"], ["calculate_flow", "INFO", "entradas, saídas e fluxo por estação · rankings ordenados"], ["na tela", "", `<span class="up">▲ ${pipeUD[0]} subidas</span> · <span class="dn">▼ ${pipeUD[1]} quedas</span> entre snapshots da janela (simulação)`]] },
+    { t: "ArcGIS Online", k: "update_arcgis", p: "Converte a latitude e a longitude de cada estação para SIRGAS 2000 / UTM 23S (EPSG 31983) e grava os pontos com bikes, vagas, entradas, saídas, fluxo e rankings.",
+      n: ["pub", "agol", "total"], e: ["pub-agol", "total-agol"], pose: 0, look: { delta: 0.3 }, log: () => [["update_arcgis", "INFO", "ArcGIS atualizado sem truncate | updates=66 | adds=0"]] },
+    { t: "Limpeza", k: "clear_old_data", p: "Depois de ler a janela, a publicação apaga do banco o que ficou antes dela. A tabela nunca cresce: guarda só os poucos minutos de que a próxima publicação precisa.",
+      n: ["pub", "pg"], e: ["pub-pg"], pose: 0, look: { delta: 0.3 }, log: () => [["clear_old_data", "INFO", "DELETE FROM nitbike_snapshot WHERE collected_at < {de}"], ["nitbike_flow_arcgis", "OK", "Finished in state Completed()"]] },
+    { t: "Gêmeo Digital", k: "a camada no mapa", p: "O Gêmeo lê a camada e mostra as estações no mapa da cidade, ao lado das outras fontes. Do snapshot ao mapa: um minuto.",
+      n: ["agol", "gem"], e: ["agol-gem"], pose: 0, look: { ring: 1, delta: 0.2 }, log: () => [["Gêmeo Digital", "", `${pipeLive()} · anel maior, estação mais cheia`]] },
+  ];
+  const PS = STEPS.length;
+  $("#pipeCaps").innerHTML = STEPS.map((s, i) => `<article class="pcap" data-i="${i}">
+      <p class="eyebrow">Do dado ao mapa · passo ${i + 1} de ${PS}</p><h3>${s.t}</h3><p class="pcap-k">${s.k}</p><p class="pcap-p">${s.p}</p>
+      ${s.big ? `<div class="pcap-big"><b class="pb-n">—</b><span>bikes paradas agora, somadas pelo subflow</span><i class="pb-bar"><i></i></i><small class="pb-s">lendo as estações…</small></div>` : ""}
+      ${s.stats ? `<dl class="pcap-st"><div><dt>65</dt><dd>estações por snapshot</dd></div><div><dt>10 s</dt><dd>entre um snapshot e outro</dd></div><div><dt>1 min</dt><dd>entre uma publicação e outra</dd></div><div><dt>5 min</dt><dd>de janela, com 30 s de folga</dd></div></dl>` : ""}
+      <div class="pcap-log"></div></article>`).join("") +
+    `<p class="pcap-note"><span class="pn-speed">Em 10×, 1 s na tela vale 10 s do fluxo.</span> O brilho de cada estação vem da última leitura do NitBike; a variação entre um snapshot e outro é ilustrativa.</p>`;
+  $("#pipeDots").innerHTML = STEPS.map((s, i) => `<li><button type="button" data-i="${i}" aria-label="Passo ${i + 1}: ${s.t}"></button></li>`).join("");
+  const pcaps = $$(".pcap", pipeEl), pdots = $$("#pipeDots button"), pnodes = $$(".pf-n", pf), pedges = $$("[data-e]", pf);
+  const hm = ms => new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(ms));
+  let pipe = null, pipeAt = -1, pipeST = null;
+  const pipeLog = () => {
+    const s = STEPS[pipeAt], box = pcaps[pipeAt] && $(".pcap-log", pcaps[pipeAt]);
+    if (!box) return;
+    const P = pipe ? pipe.pub() : { de: Date.now() - 330000, ate: Date.now() - 30000, now: Date.now() };
+    const fill = t => t.replace("{de}", hm(P.de)).replace("{ate}", hm(P.ate)).replace("{agora}", hm(P.now || Date.now()));
+    box.innerHTML = s.log ? s.log().map(([f, lv, m]) => `<p><b>${f}</b>${lv ? ` <i class="${lv === "OK" ? "ok" : ""}">${lv}</i>` : ""} ${fill(m)}</p>`).join("") : "";
+    if (s.big) pipeBig();
+  };
+  const pipeStep = k => {
+    if (k === pipeAt) return; pipeAt = k;
+    const s = STEPS[k];
+    pcaps.forEach((c, i) => c.classList.toggle("on", i === k));
+    pdots.forEach((b, i) => { b.classList.toggle("on", i === k); b.setAttribute("aria-current", i === k ? "step" : "false"); });
+    pnodes.forEach(n => { const on = s.n.includes(n.dataset.n); n.classList.toggle("on", on && !s.stats); n.classList.toggle("dim", !on); });
+    pedges.forEach(e => e.classList.toggle("on", s.e.includes(e.dataset.e)));
+    if (pipe) { pipe.pose(s.pose); pipe.look(s.look); }
+    pipeLog();
+  };
+  // números ao vivo dos passos: linhas no banco, contagem até a próxima publicação, o total real de bikes
+  // e, na janela, quantas células subiram ou caíram (a variação entre snapshots é a da simulação)
+  let pipeRows = 39, pipeNext = 6, pipeUD = [0, 0], pipeSpeed = 10;
+  const pipeTick = () => { if (!pipe) return; const S = pipe.state(); pipeRows = Math.floor(S.e) - (S.r - 33) + 1; pipeNext = Math.max(1, Math.ceil((S.r + 6 - S.e) * 10 / S.speed)); };
+  const pipeLive = () => { const L = [...stations.values()].filter(s => s.bikes != null); return L.length ? `${L.length} estações · ${fmt(L.reduce((a, s) => a + s.bikes, 0))} bikes` : "65 estações"; };
+  const pipeBig = () => {
+    const box = pcaps[4] && $(".pcap-big", pcaps[4]); if (!box) return;
+    const L = [...stations.values()].filter(s => s.bikes != null);
+    if (!L.length) return;
+    const b = L.reduce((a, s) => a + s.bikes, 0), f = L.reduce((a, s) => a + s.free, 0);
+    $(".pb-n", box).textContent = fmt(b);
+    $(".pb-bar > i", box).style.transform = `scaleX(${(b / Math.max(1, b + f)).toFixed(3)})`;
+    $(".pb-s", box).textContent = `${fmt(f)} vagas livres · ${Math.round(b / Math.max(1, b + f) * 100)}% das vagas ocupadas`;
+  };
+  const jh = (x, y) => { const v = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return v - Math.floor(v); };
+  const pipeCount = r => {
+    const occ = [...stations.values()].map(s => (s.bikes + s.free) ? s.bikes / (s.bikes + s.free) : 0.5);
+    let up = 0, dn = 0;
+    for (let c = r - 32; c <= r - 3; c++) {
+      const s1 = (c * 0.7311) % 97, s0 = ((c - 1) * 0.7311) % 97;
+      for (let k = 0; k < 65; k++) {
+        const col = k % 13, row = 4 - Math.floor(k / 13), o = occ[k] ?? 0.5;
+        const v1 = Math.min(1, Math.max(0.06, o + (jh(col + s1 * 7.13, row + s1 * 7.13) - 0.5) * 0.28)), v0 = Math.min(1, Math.max(0.06, o + (jh(col + s0 * 7.13, row + s0 * 7.13) - 0.5) * 0.28));
+        if (v1 - v0 > 0.06) up++; else if (v0 - v1 > 0.06) dn++;
+      }
+    }
+    pipeUD = [up, dn];
+  };
+  // pacotes: um ponto corre a ligação; o nó de chegada pulsa quando ele chega
+  const pks = {}; $$(".pf-pk", pf).forEach(g => (pks[g.dataset.pk] = g));
+  const nodeEl = {}; pnodes.forEach(n => (nodeEl[n.dataset.n] = n));
+  const hit = k => { const n = nodeEl[k]; if (!n || reduce) return; n.classList.remove("hit"); void n.offsetWidth; n.classList.add("hit"); };
+  const shoot = (edge, at, dur, to) => setTimeout(() => {
+    const g = pks[edge]; if (!g || reduce) return;
+    const am = g.querySelector("animateMotion");
+    am.setAttribute("dur", `${dur}ms`); g.classList.remove("go"); void g.getBBox(); g.classList.add("go");
+    try { am.beginElement(); } catch (_) {}
+    setTimeout(() => { g.classList.remove("go"); if (to) hit(to); }, dur);
+  }, at);
+  const pipeOn = {
+    // a coleta: o pacote sai da API, passa pela coleta e chega no banco no quadro em que a ficha nasce
+    pre: () => { if (!pipeSeen) return; shoot("api-coleta", 0, 170, "coleta"); shoot("coleta-pg", 170, 210, "pg"); },
+    snap: () => {
+      if (!pipeSeen) return;
+      pipeTick();
+      const chip = $("#pipeLbl [data-k=agora] b");
+      if (chip && !reduce) chip.animate([{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "translateY(-4px)", offset: 0.25 }, { opacity: 0, transform: "translateY(-20px)" }], { duration: 900, easing: "cubic-bezier(.23, 1, .32, 1)" });
+      if (STEPS[pipeAt] && STEPS[pipeAt].log) pipeLog();
+    },
+    // a publicação, na pauta do bloco 3D (pipe.T, em segundos): o total, a leitura da janela quando a
+    // varredura começa, o "apaga" quando as fichas cinza começam a se desfazer, a camada quando as
+    // primeiras partículas pousam no mapa e o Gêmeo quando o mapa pulsa
+    pub: r => {
+      pipeCount(r); pipeTick();
+      if (!pipeSeen || !pipe) return;
+      const T = pipe.T, ms = x => Math.round(x * 1000);
+      shoot("api-total", 0, 300, "total"); shoot("total-pub", 300, 280, "pub");
+      shoot("pg-pub", ms(T.read) - 280, 280, "pub"); shoot("total-agol", 600, 520);
+      shoot("pub-pg", ms(T.clean) - 350, 350, "pg");
+      shoot("pub-agol", ms(T.agol) - 300, 300, "agol"); shoot("agol-gem", ms(T.gem) - 300, 300, "gem");
+      if (STEPS[pipeAt] && STEPS[pipeAt].log) pipeLog();
+    },
+  };
+  let pipeSeen = false;
+  pipeStep(0);
+  // o log e a contagem até a próxima publicação acompanham o relógio da simulação
+  setInterval(() => { pipeTick(); if (pipe && pipeSeen && pipeAt >= 0 && STEPS[pipeAt].log) pipeLog(); }, 500);
+  // a velocidade da simulação: 1× é o tempo real (uma foto a cada 10 s, uma publicação por minuto)
+  const speedNote = v => v === 1 ? "Em 1×, tempo real: uma foto a cada 10 s e uma publicação por minuto." : `Em ${v}×, 1 s na tela vale ${v} s do fluxo: uma foto a cada ${10 / v} s e uma publicação a cada ${60 / v} s.`;
+  $$("#pipeSpeed button").forEach(b => b.addEventListener("click", () => {
+    pipeSpeed = +b.dataset.s;
+    $$("#pipeSpeed button").forEach(x => { x.classList.toggle("on", x === b); x.setAttribute("aria-pressed", x === b); });
+    $$(".pn-speed", pipeEl).forEach(n => (n.textContent = speedNote(pipeSpeed)));
+    if (pipe) pipe.setSpeed(pipeSpeed);
+    pipeTick(); pipeLog();
+  }));
+  $$(".pn-speed", pipeEl).forEach(n => (n.textContent = speedNote(10)));
+  pdots.forEach(b => b.addEventListener("click", () => {
+    if (!pipeST) return pipeStep(+b.dataset.i);
+    const y = pipeST.start + (pipeST.end - pipeST.start) * ((+b.dataset.i + 0.5) / PS);
+    if (lenis) lenis.scrollTo(y, { duration: 1 }); else scrollTo({ top: y, behavior: "smooth" });
+  }));
+  // o fluxograma tem um tamanho de desenho fixo e é encaixado na largura disponível
+  const pfFit = () => { const k = Math.min(1, pf.parentElement.clientWidth / 1240); pf.style.transform = `scale(${k.toFixed(4)})`; pf.parentElement.style.height = `${Math.round(310 * k)}px`; };
+  pfFit(); addEventListener("resize", pfFit);
+  // ocupação de cada estação na última leitura, na ordem da grade (13 colunas × 5 linhas)
+  const pipeFill = () => pipe && pipe.setFill([...stations.values()].map(s => (s.bikes + s.free) ? s.bikes / (s.bikes + s.free) : null));
+  if (hasGsap) pipeST = ScrollTrigger.create({ trigger: pipeRun, start: "top top", end: "bottom bottom", onUpdate: s => pipeStep(Math.min(PS - 1, Math.floor(s.progress * PS))) });
+  // a tampa do notebook acompanha a rolagem: abre quando a seção chega (pipeIn, 0 a 1 enquanto ela sobe
+  // na tela) e fecha quando ela vai embora (pipeOut, 0 a 1 enquanto ela sai por cima)
+  let pipeIn = 1, pipeOut = 0;
+  const pipeLid = () => { if (pipe) pipe.setLid(pipeIn, pipeOut); };
+  if (hasGsap && !reduce) {
+    pipeIn = 0;
+    ScrollTrigger.create({ trigger: pipeRun, start: "top bottom", end: "top top", onUpdate: s => { pipeIn = s.progress; pipeLid(); }, onLeave: () => { pipeIn = 1; pipeLid(); }, onLeaveBack: () => { pipeIn = 0; pipeLid(); } });
+    ScrollTrigger.create({ trigger: pipeRun, start: "bottom bottom", end: "bottom top", onUpdate: s => { pipeOut = s.progress; pipeLid(); }, onLeave: () => { pipeOut = 1; pipeLid(); }, onLeaveBack: () => { pipeOut = 0; pipeLid(); } });
+  }
+  {
+    const lbl = {}; $$("#pipeLbl span").forEach(el => (lbl[el.dataset.k] = el));
+    let asked = false, seen = false;
+    const loadPipe = () => {
+      if (asked) return; asked = true;
+      import("./pipe.js?v=202611110225").then(m => {
+        pipe = m.createPipe({ canvas: $("#pipeGL"), labels: lbl, reduce, stations: [...stations.values()].map(s => [s.x / 100, s.y / 100]), on: pipeOn });
+        pipeFill(); pipe.pose(STEPS[Math.max(0, pipeAt)].pose); pipe.look(STEPS[Math.max(0, pipeAt)].look); pipe.setSpeed(pipeSpeed); pipeLid();
+        if (seen) pipe.start();
+        addEventListener("resize", () => pipe.resize());
+        pipeEl.classList.add("gl");
+      }).catch(() => pipeEl.classList.add("flat"));
+    };
+    new IntersectionObserver(([e]) => { if (e.isIntersecting) loadPipe(); }, { rootMargin: "120% 0px" }).observe(pipeRun);
+    new IntersectionObserver(([e]) => { seen = pipeSeen = e.isIntersecting; if (pipe) pipe[seen ? "start" : "stop"](); }).observe(pipeStage);
+    // a cada leitura nova do NitBike, as estações do bloco acendem com a ocupação de agora
+    setInterval(pipeFill, 60000);
+  }
+
   /* ---------- 03 · outras frentes: Colab e a prova de conceito ---------- */
   const C = D.colab, cMax = Math.max(...C.series.map(s => s[1])), cLast = C.series.length - 1;
   $("#civic").innerHTML = `<div class="civ-top">
-      <div class="civ-big"><p class="eyebrow">05 — Outras frentes · Colab</p><b>${C.kpis[0][0]}</b><span>${C.kpis[0][1]}</span></div>
+      <div class="civ-big"><p class="eyebrow">06 — Outras frentes · Colab</p><b>${C.kpis[0][0]}</b><span>${C.kpis[0][1]}</span></div>
       <div class="civ-side"><h3>Pedidos dos moradores, <em>no mapa</em></h3><p class="lead">${C.pitch}</p>
         <div class="split" aria-hidden="true"><i style="flex:${parseInt(C.kpis[1][0])}"></i><i style="flex:${parseInt(C.kpis[2][0])}"></i></div>
         <div class="split-k"><span><b>${C.kpis[1][0]}</b> ${C.kpis[1][1]}</span><span><b>${C.kpis[2][0]}</b> ${C.kpis[2][1]}</span></div></div>
@@ -386,7 +588,7 @@
   const loadLab = () => {
     if (labOn) return; labOn = true;
     const f = document.createElement("iframe");
-    f.src = "lab.html?v=202611101710"; f.title = "Gêmeo simplificado e pipeline do NitBike";
+    f.src = "lab.html?v=202611110225"; f.title = "Gêmeo simplificado e pipeline do NitBike";
     labOrb.set({ state: "working", size: 20 }); $("span", labWait).textContent = "carregando o laboratório…";
     f.addEventListener("load", () => { labWait.classList.add("gone"); setTimeout(() => labWait.remove(), 400); }, { once: true });
     labFrame.insertBefore(f, labWait);
@@ -396,11 +598,14 @@
   labIO.observe(labFrame);
   // o quadro é do mesmo site, então o navegador não o pausa sozinho: longe da tela, ele para de animar
   let labNear = false;
-  const labPause = () => { const f = $("iframe", labFrame); if (f && f.contentWindow) f.contentWindow.postMessage({ type: "lab-pause", on: !labNear }, location.origin); };
+  let labSeen = false;
+  const labPause = () => { const f = $("iframe", labFrame); if (f && f.contentWindow) f.contentWindow.postMessage({ type: "lab-pause", on: !labSeen }, location.origin); };
   new IntersectionObserver(([e]) => {
     labNear = e.isIntersecting; labPause();
     if (labNear && labPending) { labH = labPending; labPending = 0; labFrame.style.setProperty("--h", `${labH}px`); if (hasGsap) ScrollTrigger.refresh(); }
   }, { rootMargin: "40% 0px" }).observe(labFrame);
+  // e para de animar assim que sai da tela (a altura continua liberada até 40% de distância, como acima)
+  new IntersectionObserver(([e]) => { labSeen = e.isIntersecting; labPause(); }).observe(labFrame);
   labFrame.addEventListener("load", labPause, true);
   // a altura do quadro muda muitas vezes enquanto o React monta: o refresh só roda quando ela assenta
   let labH = 0, labT = 0, labPending = 0;
@@ -702,7 +907,7 @@
   // longo da linha, então pontos vizinhos andam sempre juntos e a linha nunca dobra em quina.
   // Uma ponta sai um pouco antes da outra, e a linha entra no núcleo como um fio sendo puxado.
   // O desenho final passa por uma spline (Catmull-Rom), então toda curva é contínua e sem ângulos.
-  const LP = 24, TAU = Math.PI * 2;
+  const LP = 16, TAU = Math.PI * 2;   // pontos por linha: a suavização Catmull-Rom mantém a curva redonda com 16
   let lineKey = "", gCoreEl = null;
   const unwrap = arr => { for (let i = 1; i < arr.length; i++) { while (arr[i] - arr[i - 1] > Math.PI) arr[i] -= TAU; while (arr[i] - arr[i - 1] < -Math.PI) arr[i] += TAU; } return arr; };
   const lineSetup = () => {
@@ -755,14 +960,19 @@
       L.spin = 0.55 + plane * 0.12;
     });
   };
+  // arredonda para um décimo sem toFixed (que é bem mais lento): são milhares de números por quadro
+  const r1 = v => Math.round(v * 10) / 10;
   const smooth = pts => {
-    let d = `M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
-    for (let i = 0; i < pts.length - 1; i++) {
-      const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
-      d += ` C${(p1[0] + (p2[0] - p0[0]) / 6).toFixed(1)} ${(p1[1] + (p2[1] - p0[1]) / 6).toFixed(1)} ${(p2[0] - (p3[0] - p1[0]) / 6).toFixed(1)} ${(p2[1] - (p3[1] - p1[1]) / 6).toFixed(1)} ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+    const n = pts.length;
+    let d = "M" + r1(pts[0][0]) + " " + r1(pts[0][1]);
+    for (let i = 0; i < n - 1; i++) {
+      const p0 = pts[i > 0 ? i - 1 : 0], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2 < n ? i + 2 : n - 1];
+      d += " C" + r1(p1[0] + (p2[0] - p0[0]) / 6) + " " + r1(p1[1] + (p2[1] - p0[1]) / 6) + " " + r1(p2[0] - (p3[0] - p1[0]) / 6) + " " + r1(p2[1] - (p3[1] - p1[1]) / 6) + " " + r1(p2[0]) + " " + r1(p2[1]);
     }
     return d;
   };
+  // só escreve no DOM o que mudou: cada escrita de atributo ou estilo custa um recálculo
+  const put = (el, k, v) => { const c = el._c || (el._c = {}); if (c[k] !== v) { c[k] = v; if (k[0] === "@") el.setAttribute(k.slice(1), v); else el.style[k] = v; } };
   const sstep = t => t * t * t * (t * (t * 6 - 15) + 10);   // smootherstep: começa e termina sem tranco
   const pullLines = (m, time, dt = 0.016) => {
     // sem medida válida (grafo ainda sem tamanho, um quadro de redesenho), não desenha nada errado
@@ -773,10 +983,10 @@
     // fecha em volta dele e as pontas de fora das linhas se apagam sozinhas, sem cortes
     const grad = gsvg.querySelector("#gCore"), R0 = Math.max(gsvg.viewBox.baseVal.width, 600), f = ss(0.2, 0.75, m);
     if (grad) {
-      grad.setAttribute("cx", cx0.toFixed(1)); grad.setAttribute("cy", cy0.toFixed(1)); grad.setAttribute("r", R0.toFixed(0));
+      put(grad, "@cx", cx0.toFixed(1)); put(grad, "@cy", cy0.toFixed(1)); put(grad, "@r", R0.toFixed(0));
       const st = grad.children, o = [sR * 0.07, sR * 0.16, lerp(0.6 * R0, sR * 0.8, f), lerp(R0, sR * 1.45, f)].map(v => cl(v / R0));
-      st[1].setAttribute("offset", o[0].toFixed(4)); st[2].setAttribute("offset", Math.max(o[0] + 0.001, o[1]).toFixed(4));
-      st[3].setAttribute("offset", Math.max(o[1] + 0.002, o[2]).toFixed(4)); st[4].setAttribute("offset", Math.max(o[2] + 0.003, o[3]).toFixed(4));
+      put(st[1], "@offset", o[0].toFixed(4)); put(st[2], "@offset", Math.max(o[0] + 0.001, o[1]).toFixed(4));
+      put(st[3], "@offset", Math.max(o[1] + 0.002, o[2]).toFixed(4)); put(st[4], "@offset", Math.max(o[2] + 0.003, o[3]).toFixed(4));
     }
     // cada linha se transforma direto no seu anel: os pontos da curva original e os do arco final são
     // misturados (uma mistura de duas curvas suaves é sempre suave, então não há quina nem laço solto).
@@ -784,7 +994,7 @@
     // vira uma curva, e o conjunto parece entrar em órbita. A entrada é por plano: primeiro os fios do
     // primeiro anel, depois os do segundo, depois os do terceiro
     gLinks.forEach(L => {
-      const n3 = Math.ceil(gLinks.length / 3), pts = [], o = L.orb, kin = Math.floor(Math.round(L.k * gLinks.length) / 3) / n3;
+      const n3 = Math.ceil(gLinks.length / 3), pts = L.pts || (L.pts = Array.from({ length: LP }, () => [0, 0])), o = L.orb, kin = Math.floor(Math.round(L.k * gLinks.length) / 3) / n3;
       // primeiro tempo (0 a 0,22): as ligações se apertam no centro, ainda presas nos botões; só então soltam
       // a soltura começa antes de o aperto terminar: um movimento emenda no outro, sem parada no meio
       const pinch = sstep(cl(m / 0.24)), start = 0.07 + o.plane * 0.11 + kin * 0.05;
@@ -798,7 +1008,7 @@
         const ex = Math.cos(pa) * o.rk, ey = Math.sin(pa) * o.rk * o.squash;
         const tx = cx0 + ex * cr - ey * sr, ty = cy0 + ex * sr + ey * cr;
         const sx = L.ox[i] + (L.qx[i] - L.ox[i]) * pinch, sy = L.oy[i] + (L.qy[i] - L.oy[i]) * pinch;
-        pts.push([sx + (tx - sx) * w, sy + (ty - sy) * w]);
+        pts[i][0] = sx + (tx - sx) * w; pts[i][1] = sy + (ty - sy) * w;
       }
       const em = wSum / LP;
       if (pts.some(q => !isFinite(q[0]) || !isFinite(q[1]))) return;
@@ -820,10 +1030,10 @@
       let a = L.lead > 0 ? 0 : 1 - vis, b = L.lead > 0 ? vis : 1;
       b = Math.min(b, grow); if (b < a) b = a;
       const len = Math.max(0.0001, b - a);
-      L.p.style.strokeDasharray = `${len.toFixed(4)} ${(1.0002 - len).toFixed(4)}`;
-      L.p.style.strokeDashoffset = (-a - (L.fl % 1)).toFixed(4);
-      L.p.style.strokeWidth = (1.3 - 0.45 * em).toFixed(2);
-      L.p.style.opacity = "1";
+      put(L.p, "strokeDasharray", `${len.toFixed(4)} ${(1.0002 - len).toFixed(4)}`);
+      put(L.p, "strokeDashoffset", (-a - (L.fl % 1)).toFixed(4));
+      put(L.p, "strokeWidth", (1.3 - 0.45 * em).toFixed(2));
+      put(L.p, "opacity", "1");
     });
   };
   const sDraw = now => {
@@ -837,7 +1047,7 @@
     if (sM <= 0 && sT <= 0) {
       cancelAnimationFrame(sRaf); sRaf = 0; sFrom = null;
       if (was) {
-        gLinks.forEach(({ p }) => { p.style.opacity = p.style.stroke = p.style.strokeWidth = p.style.strokeDasharray = p.style.strokeDashoffset = ""; });
+        gLinks.forEach(({ p }) => { p._c = null; p.style.opacity = p.style.stroke = p.style.strokeWidth = p.style.strokeDasharray = p.style.strokeDashoffset = ""; });
         lineKey = ""; gCoreEl = null; drawGraph();
         // de volta ao grafo: entra o destaque que a rolagem pede agora (o último trabalho, se for o caso)
         focusGraph("w", toolsAt >= 0 ? D.works[toolsAt].id : null);
@@ -888,10 +1098,21 @@
     sCore.style.transform = `translate(-50%, -50%) scale(${((0.05 + 0.33 * glow) * beat).toFixed(3)})`;
     sHalo.style.opacity = "0";
   };
-  const sLoop = now => { sRaf = requestAnimationFrame(sLoop); sDraw(now); };
+  // parado em órbita (a rolagem não mexe e só os anéis giram devagar), 30 quadros por segundo bastam;
+  // enquanto a forma muda, o desenho segue a 60
+  let sSkip = false;
+  const sLoop = now => {
+    sRaf = requestAnimationFrame(sLoop);
+    const still = sM === sT && sL === sLT && sM >= 1;
+    if (still && (sSkip = !sSkip)) return;
+    sDraw(now);
+  };
+  // com o contato cobrindo a tela inteira, o globo por baixo não aparece: o laço para e volta quando sobe
+  let sHide = false;
   const sphereTo = (m, l) => {
     if (m > 0 && !sFrom) sMeasure();
     sT = m; sLT = l;
+    if (sHide) { if (sRaf) { cancelAnimationFrame(sRaf); sRaf = 0; } return; }
     if (m > 0 && !sRaf) { sLast = 0; sRaf = requestAnimationFrame(sLoop); }
   };
   let toolsAt = -2, toolsST = null;
@@ -912,6 +1133,7 @@
     // durante o globo o destaque não é aplicado (as linhas estão sendo desenhadas por ele); fica guardado
     // e entra quando o grafo se refaz, na volta
     if (k !== toolsAt) { toolsAt = k; if (!sRaf && sM <= 0) focusGraph("w", k < 0 ? null : D.works[k].id); }
+    sHide = p > 0.995;
     sphereTo(Math.min(1, Math.max(0, (p - 0.24) / 0.38)), Math.min(1, Math.max(0, (p - 0.64) / 0.2)));
   };
 

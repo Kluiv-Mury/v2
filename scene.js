@@ -236,7 +236,7 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
 
   layers.forEach((l, i) => {
     const gr = new THREE.Group();
-    const pm = new THREE.MeshBasicMaterial({ color: l.mine ? 0x1e120b : 0x13120f, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
+    const pm = new THREE.MeshBasicMaterial({ color: l.mine ? 0x1e120b : 0x13120f, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true });
     const plate = new THREE.Mesh(plateGeo, pm); plate.position.set(crop.cx, 0, crop.cz); plate.renderOrder = i * 3; plate.userData.k = i;
     const mm = new THREE.MeshBasicMaterial({ color: CREAM, map: null, transparent: true, opacity: 0, depthWrite: false });
     const mapPlate = new THREE.Mesh(cg, mm); mapPlate.position.set(crop.cx, 0.004, crop.cz); mapPlate.renderOrder = i * 3 + 1;
@@ -287,7 +287,7 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
       let sd = 5; const r2 = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
       const hs = pts.map(() => 0.16 + r2() * 0.18), lv = pts.map(() => 0.3 + r2() * 0.5);
       const m4 = new THREE.Matrix4();
-      const cm = new THREE.MeshBasicMaterial({ color: 0x9cc9ff, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+      const cm = new THREE.MeshBasicMaterial({ color: 0x9cc9ff, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true });
       const cyl = new THREE.CylinderGeometry(0.032, 0.032, 1, 24, 1, true); cyl.translate(0, 0.5, 0);
       const tube = new THREE.InstancedMesh(cyl, cm, n);
       pts.forEach(([x, z], k) => { m4.makeScale(1, hs[k], 1); m4.setPosition(x, 0.004, z); tube.setMatrixAt(k, m4); });
@@ -351,7 +351,7 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
       add(new THREE.Points(rec, recM), recM, 1, true);
       // o leque: um setor de 52° no chão, aceso perto da câmera e sumindo no alcance, com as bordas marcadas
       const R = 0.44, fan = new THREE.CircleGeometry(R, 24, -0.45, 0.9); fan.rotateX(-Math.PI / 2);
-      const fanM = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      const fanM = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true,
         uniforms: { uTime, uO: { value: 0 } },
         vertexShader: `varying vec2 vP; void main() { vP = position.xz; gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.); }`,
         fragmentShader: `uniform float uO, uTime; varying vec2 vP;
@@ -390,10 +390,15 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
         const bi = add(new THREE.InstancedMesh(body, bodyM, fleet.length), bodyM, 1);
         const gi = add(new THREE.InstancedMesh(glass, glassM, fleet.length), glassM, 1);
         const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), upv = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3(), tg = new THREE.Vector3();
+        // cada rota vira uma tabela de pontos igualmente espaçados: por quadro só se interpola nela
+        // (percorrer a curva pelo comprimento a cada quadro custava caro)
+        const LUT = new Map();
+        fleet.forEach(b => { if (!LUT.has(b.curve)) LUT.set(b.curve, b.curve.getSpacedPoints(Math.max(60, Math.ceil(b.len * 80)))); });
         busTick = time => {
           fleet.forEach((b, k) => {
             const w = (b.off + time * b.v) % 2, u = w < 1 ? w : 2 - w;     // vai e volta pela rota
-            b.curve.getPointAt(Math.min(0.999, Math.max(0.001, u)), p); b.curve.getTangentAt(Math.min(0.999, Math.max(0.001, u)), tg);
+            const P = LUT.get(b.curve), f = Math.min(0.999, Math.max(0.001, u)) * (P.length - 1), i = Math.floor(f), t = f - i, A = P[i], B = P[Math.min(P.length - 1, i + 1)];
+            p.set(A.x + (B.x - A.x) * t, A.y + (B.y - A.y) * t, A.z + (B.z - A.z) * t); tg.set(B.x - A.x, 0, B.z - A.z);
             q.setFromAxisAngle(upv, Math.atan2(-tg.z, tg.x));
             m4.compose(p, q, one); bi.setMatrixAt(k, m4); gi.setMatrixAt(k, m4);
           });
@@ -442,7 +447,7 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
   const resize = () => {
     const r = canvas.getBoundingClientRect();
     W = Math.max(1, r.width); H = Math.max(1, r.height); narrow = W < 860;
-    dprMax = Math.min(devicePixelRatio || 1, narrow ? 1.5 : 1.75);
+    dprMax = Math.min(devicePixelRatio || 1, narrow ? 1.25 : 1.5);
     dpr = Math.min(dpr === 1 && dprMax > 1 ? dprMax : dpr, dprMax);
     renderer.setPixelRatio(dpr); renderer.setSize(W, H, false);
     camera.aspect = W / H;
@@ -472,10 +477,12 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
   // resolução que se adapta: se os quadros passam de ~20 ms a imagem perde nitidez antes de perder fluidez,
   // e volta a ficar nítida quando sobra folga. Cada troca espera um tempo para não ficar oscilando
   let last = 0, slow = 0, fast = 0;
-  const adapt = now => {
+  const adapt = (now, half) => {
     const dt = last ? now - last : 16.7; last = now;
     if (dt > 100) return;   // aba voltou do fundo: não conta
-    if (dt > 20) { slow++; fast = 0; } else if (dt < 13) { fast++; slow = Math.max(0, slow - 1); } else slow = Math.max(0, slow - 1);
+    // a 30 quadros (cena parada) o tempo esperado entre quadros dobra
+    const k = half ? 2 : 1;
+    if (dt > 20 * k) { slow++; fast = 0; } else if (dt < 13 * k) { fast++; slow = Math.max(0, slow - 1); } else slow = Math.max(0, slow - 1);
     let next = dpr;
     if (slow > 24 && dpr > 1) next = Math.max(1, dpr - 0.25);
     else if (fast > 240 && dpr < dprMax) next = Math.min(dprMax, dpr + 0.25);
@@ -483,9 +490,14 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
   };
   // amortecimento: uma rolada brusca não vira um salto de câmera; a cena chega ao alvo em ~meio segundo
   let tState = 0, tExplode = 0, first = true, lastF = 0;
+  // com a rolagem e o mouse parados, a cena só tem movimentos lentos (chuva, ônibus, giro da câmera):
+  // desenha a 30 quadros por segundo; ao rolar ou mexer o mouse, volta a 60 no mesmo quadro
+  let half = false, skip = false;
   const frame = now => {
     raf = requestAnimationFrame(frame);
-    adapt(now);
+    half = tState === state && tExplode === explode && Math.abs(mx - sx) < 0.003 && Math.abs(my - sy) < 0.003 && hl.every((v, k) => Math.abs(v - (focus < 0 || k === focus ? 1 : 0.16)) < 0.01 && Math.abs(fk[k] - (k === focus ? 1 : 0)) < 0.01);
+    if (half && (skip = !skip)) return;
+    adapt(now, half);
     const dtF = lastF ? Math.min(0.1, (now - lastF) / 1000) : 0.016; lastF = now;
     const kF = 1 - Math.exp(-dtF * 4.5);
     state += (tState - state) * kF; explode += (tExplode - explode) * kF;

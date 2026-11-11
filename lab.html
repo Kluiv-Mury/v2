@@ -15,7 +15,18 @@
   });
 })();
 </script>
-<style>.lab-paused *, .lab-paused *::before, .lab-paused *::after { animation-play-state: paused !important; }</style>
+<style>.lab-paused *, .lab-paused *::before, .lab-paused *::after { animation-play-state: paused !important; }</style><script>(function () {
+  var nraf = window.requestAnimationFrame.bind(window), q = new Map(), id = 0, tick = 0, last = 0;
+  function pump(t) {
+    tick = 0;
+    if (t - last < 32) { tick = nraf(pump); return; }
+    last = t;
+    var cbs = Array.from(q.values()); q.clear();
+    cbs.forEach(function (cb) { try { cb(t); } catch (e) { setTimeout(function () { throw e; }); } });
+  }
+  window.requestAnimationFrame = function (cb) { var i = ++id; q.set(i, cb); if (!tick) tick = nraf(pump); return i; };
+  window.cancelAnimationFrame = function (i) { q.delete(i); };
+})();</script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Laboratório · Gêmeo simplificado</title>
@@ -2966,6 +2977,8 @@
     .live-chapter { margin-top: 2.2rem; }
     .live-chapter:first-child { margin-top: 0; }
     .cardx { box-shadow: none !important; }
+    /* o pipeline do NitBike agora tem seção própria no site; aqui fica só o Gêmeo */
+    #live-cap-2, #live-cap-2 + .live-card, #live-cap-1 .live-chapter-n { display: none !important; }
 
   </style>
 </head>
@@ -10686,7 +10699,7 @@ function GemeoLive() {
   }), /*#__PURE__*/React.createElement("div", {
     className: "cardx live-card",
     ref: pipeRef
-  }, /*#__PURE__*/React.createElement(NbPipeline, {
+  }, /*#__PURE__*/false && React.createElement(NbPipeline, {
     sim: nb.current,
     N: N,
     speed: nbSpeed,

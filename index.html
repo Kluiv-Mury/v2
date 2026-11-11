@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..800&family=Geist:wght@300..700&family=Geist+Mono:wght@400..600&family=Newsreader:ital,opsz,wght@1,6..72,400..500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="v5.css?v=202611101710" />
+  <link rel="stylesheet" href="v5.css?v=202611110225" />
   <link rel="preload" as="image" href="mapa-niteroi.svg" />
 </head>
 <body>
@@ -86,13 +86,37 @@
       </div>
     </section>
 
-    <!-- 04 · laboratório -->
-    <section class="ch lab" id="lab" data-chap="04" data-title="Laboratório" aria-labelledby="lab-t">
+    <!-- 04 · pipeline: do snapshot à camada -->
+    <section class="ch pipe" id="pipeline" data-chap="04" data-title="Do snapshot à camada" aria-labelledby="pipe-t">
+      <div class="wrap pipe-head">
+        <p class="eyebrow">04 — Do snapshot à camada</p>
+        <h2 class="rise" id="pipe-t"><span class="ln"><span>Um snapshot a cada 10 s.</span></span> <span class="ln"><span><em>Uma janela por minuto.</em></span></span></h2>
+        <p class="lead">Por trás das estações do mapa rodam dois flows: a coleta grava as 65 estações no banco a cada 10 s; a publicação lê os últimos 5 min, calcula o que entrou e saiu e atualiza a camada. Role para ver um passo de cada vez.</p>
+      </div>
+      <div class="pipe-run" id="pipeRun">
+        <div class="pipe-stage" id="pipeStage">
+          <div class="pf-box"><div class="pf" id="pipeFlow" aria-hidden="true"></div></div>
+          <canvas id="pipeGL" aria-hidden="true"></canvas>
+          <div class="pipe-lbl" id="pipeLbl" aria-hidden="true">
+            <span data-k="janela"><b>Janela · 5 min</b><i>30 snapshots lidos a cada publicação</i></span>
+            <span data-k="folga"><b>Folga · 30 s</b><i>o snapshot ainda está sendo gravado</i></span>
+            <span data-k="limpeza"><b>Limpeza</b><i>apagado na publicação</i></span>
+            <span data-k="agora" class="pl-chip"><b>+65 linhas</b></span>
+          </div>
+          <div class="pipe-caps" id="pipeCaps"></div>
+          <div class="pipe-speed" id="pipeSpeed" role="group" aria-label="Velocidade da simulação"><span>velocidade</span><button type="button" data-s="1" aria-pressed="false">1×</button><button type="button" data-s="5" aria-pressed="false">5×</button><button type="button" data-s="10" class="on" aria-pressed="true">10×</button></div>
+          <ol class="pipe-dots" id="pipeDots" aria-label="Passos do pipeline"></ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- 05 · laboratório -->
+    <section class="ch lab" id="lab" data-chap="05" data-title="Laboratório" aria-labelledby="lab-t">
       <div class="wrap">
-        <p class="eyebrow">04 — Laboratório</p>
+        <p class="eyebrow">05 — Laboratório</p>
         <div class="lab-head">
           <h2 id="lab-t">Mexa no <em>Gêmeo simplificado</em></h2>
-          <p class="lead">A cidade lida neste minuto e o pipeline do NitBike rodando: um snapshot a cada 10 s, uma publicação por minuto, o pico da madrugada. Os ônibus e o acidente são simulados; o resto vem das camadas públicas.</p>
+          <p class="lead">A cidade lida neste minuto: estações do NitBike, alertas do Waze, chuva e ônibus no mesmo mapa. Clique num alerta, num pluviômetro ou numa câmera. Os ônibus e o acidente são simulados; o resto vem das camadas públicas.</p>
         </div>
         <div class="lab-frame" id="labFrame"><p class="lab-wait"><svg class="orb" width="20" height="20" aria-hidden="true"></svg><span>O laboratório carrega quando você chega perto.</span></p></div>
       </div>
@@ -102,14 +126,14 @@
     <div class="ticker" id="ticker" aria-label="Niterói agora"><div class="tk-move"><p id="tkA"></p><p aria-hidden="true" id="tkB"></p></div></div>
 
     <!-- 05 · outras frentes -->
-    <section class="ch civic" data-chap="05" data-title="Outras frentes" aria-label="Colab e prova de conceito de trânsito">
+    <section class="ch civic" data-chap="06" data-title="Outras frentes" aria-label="Colab e prova de conceito de trânsito">
       <div class="wrap" id="civic"></div>
     </section>
 
     <!-- 06 · partidas -->
-    <section class="ch board" id="trajetoria" data-chap="06" data-title="Trajetória" aria-labelledby="board-t">
+    <section class="ch board" id="trajetoria" data-chap="07" data-title="Trajetória" aria-labelledby="board-t">
       <div class="wrap">
-        <p class="eyebrow">06 — Trajetória</p>
+        <p class="eyebrow">07 — Trajetória</p>
         <h2 id="board-t">Painel de <em>partidas</em></h2>
         <div class="flap" id="flap" role="table" aria-label="Experiência e formação"></div>
         <div class="lines-head"><h3>As linhas em operação</h3><p>Cada frente de trabalho é uma linha. Toque para ver o trajeto.</p></div>
@@ -118,18 +142,18 @@
     </section>
 
     <!-- 07 · projetos -->
-    <section class="ch pjs" id="projetos" data-chap="07" data-title="Projetos" aria-labelledby="deck-t">
+    <section class="ch pjs" id="projetos" data-chap="08" data-title="Projetos" aria-labelledby="deck-t">
       <div class="wrap pjs-head">
-        <p class="eyebrow">07 — Projetos</p>
+        <p class="eyebrow">08 — Projetos</p>
         <h2 class="rise" id="deck-t"><span class="ln"><span>Coisas que eu</span></span> <span class="ln"><span><em>construí</em></span></span></h2>
       </div>
       <div id="pjList"></div>
     </section>
 
     <!-- 08 · ferramentas -->
-    <section class="ch tools" id="ferramentas" data-chap="08" data-title="Ferramentas" aria-labelledby="tools-t">
+    <section class="ch tools" id="ferramentas" data-chap="09" data-title="Ferramentas" aria-labelledby="tools-t">
       <div class="wrap tools-head">
-        <p class="eyebrow">08 — Ferramentas</p>
+        <p class="eyebrow">09 — Ferramentas</p>
         <h2 id="tools-t">Onde cada ferramenta <em>trabalhou</em></h2>
         <p class="lead">Role para passar por cada trabalho, ou passe o mouse (ou toque) num trabalho ou numa ferramenta.</p>
       </div>
@@ -137,9 +161,9 @@
     </section>
 
     <!-- 09 · ponto final -->
-    <section class="ch end" id="contato" data-chap="09" data-title="Ponto final" aria-labelledby="end-t">
+    <section class="ch end" id="contato" data-chap="10" data-title="Ponto final" aria-labelledby="end-t">
       <div class="wrap">
-        <p class="eyebrow">09 — Ponto final</p>
+        <p class="eyebrow">10 — Ponto final</p>
         <h2 class="end-big rise" id="end-t"><span class="ln"><span>Vamos</span></span> <span class="ln"><span><em>conversar?</em></span></span></h2>
         <div class="end-grid">
           <p class="lead">Tenho interesse em oportunidades e projetos de backend, engenharia de dados e tecnologia para o setor público. O contato mais rápido é por e-mail.</p>
@@ -168,9 +192,9 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.13.0/gsap.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.13.0/ScrollTrigger.min.js"></script>
   <script src="https://unpkg.com/lenis@1.1.13/dist/lenis.min.js"></script>
-  <script src="data.js?v=202611101710"></script>
-  <script src="geo.js?v=202611101710"></script>
-  <script src="v5.js?v=202611101710"></script>
+  <script src="data.js?v=202611110225"></script>
+  <script src="geo.js?v=202611110225"></script>
+  <script src="v5.js?v=202611110225"></script>
 </body>
 </html>
 
