@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..800&family=Geist:wght@300..700&family=Geist+Mono:wght@400..600&family=Newsreader:ital,opsz,wght@1,6..72,400..500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="v5.css?v=202611110340" />
+  <link rel="stylesheet" href="v5.css?v=202611111050" />
   <link rel="preload" as="image" href="mapa-niteroi.svg" />
   <!-- entrada da abertura: html.pre esconde o que vai entrar e html.go toca quando as fontes do título chegam
        (ou em 1,4 s, o que vier antes). Sem JS ou com movimento reduzido, nada fica escondido. -->
@@ -32,8 +32,11 @@
         d.dispatchEvent(new Event("hero:go"));
         setTimeout(function () { r.classList.remove("pre", "go"); }, 3200);
       };
-      setTimeout(go, 1400);
-      try { Promise.all([d.fonts.load('800 1em "Bricolage Grotesque"'), d.fonts.load('italic 400 1em "Newsreader"')]).then(go, go); } catch (e) { go(); }
+      // a entrada parte quando as fontes e o v5.js estão prontos (ele chama __heroReady); em 1,8 s parte de qualquer jeito
+      var need = 2, tick = function () { if (--need < 1) go(); };
+      window.__heroReady = tick;
+      setTimeout(go, 1800);
+      try { Promise.all([d.fonts.load('800 1em "Bricolage Grotesque"'), d.fonts.load('italic 400 1em "Newsreader"'), d.fonts.load('500 1em "Geist Mono"')]).then(tick, tick); } catch (e) { tick(); }
     })(document);
   </script>
 </head>
@@ -66,6 +69,8 @@
           <img src="mapa-niteroi.svg" alt="" width="2000" height="1225" decoding="async" />
           <svg class="hero-st" id="heroSt" viewBox="0 0 2000 1225" aria-hidden="true"></svg>
         </div>
+        <canvas class="hero-fx" id="heroFx" aria-hidden="true"></canvas>
+        <i class="hero-lens" id="heroLens" aria-hidden="true"></i>
         <div class="hero-shade" aria-hidden="true"></div>
         <div class="hero-copy">
           <p class="eyebrow hero-live" id="heroLive"><svg class="orb" width="16" height="16" aria-hidden="true"></svg><span>ao vivo · lendo as estações do NitBike…</span></p>
@@ -81,6 +86,7 @@
           </div>
         </div>
         <div class="hero-tip" id="heroTip" role="status" aria-live="polite"></div>
+        <div class="hero-hud" id="heroHud" aria-hidden="true"><b></b><span></span></div>
       </div>
     </section>
 
@@ -225,7 +231,7 @@
   <script src="https://unpkg.com/lenis@1.1.13/dist/lenis.min.js"></script>
   <script src="data.js?v=202611110225"></script>
   <script src="geo.js?v=202611110225"></script>
-  <script src="v5.js?v=202611110340"></script>
+  <script src="v5.js?v=202611111050"></script>
 </body>
 </html>
 

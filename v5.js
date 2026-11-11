@@ -143,6 +143,7 @@
   // câmera: no começo a rede inteira à direita do nome; ao rolar, desce até o Terminal (estação 4), no Centro
   const term = stations.get(4) || [...stations.values()][0];
   let Z1 = 2.6, camM = 1;   // camM: na entrada a câmera começa um pouco mais perto e assenta
+  const cam = { x: 0, y: 0, z: 1 };   // a câmera em números: quem desenha por cima do mapa (canvas, lente) lê daqui
   const camera = p => {
     const vw = innerWidth, vh = innerHeight, mob = !wide();
     const zA = (mob ? 0.95 : Math.max(1.1, Math.min(1.75, vw / 900))) * camM, zB = mob ? 2.1 : 2.6;
@@ -152,6 +153,7 @@
     const e = p * p * (3 - 2 * p);
     const z = A.z + (B.z - A.z) * e;
     const x = A.x + (B.x - A.x) * e, y = A.y + (B.y - A.y) * e;
+    cam.x = x; cam.y = y; cam.z = z;
     mapEl.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) scale(${(z / Z1).toFixed(4)})`;
   };
   const sizeMap = () => {
@@ -161,6 +163,246 @@
   sizeMap(); camera(0);
   addEventListener("resize", () => { sizeMap(); camera(heroP); });
   let heroP = 0;
+
+  /* ---------- 00 · do feed ao mapa: a abertura num canvas só ---------- */
+  // Uma camada 2D do tamanho da tela (nunca do tamanho do mapa) desenha a entrada e o que fica vivo depois:
+  //  · entrada: as linhas do feed aparecem como texto; cada uma é lida, vira um ponto, voa até a sua estação e
+  //    abre um clarão no véu que cobre o mapa. O mapa aparece porque o dado chegou;
+  //  · depois: viagens circulando entre estações vizinhas.
+  // Tudo lê a câmera a cada quadro (cam), então acompanha a rolagem e a câmera que assenta sem código a mais.
+  const stage = $(".hero-stage"), fxEl = $("#heroFx"), root = document.documentElement;
+  const fx = !reduce && fxEl && fxEl.getContext ? fxEl.getContext("2d") : null;
+  const list = [...stations.values()];
+  const scr = s => [cam.x + s.x * cam.z, cam.y + s.y * cam.z];
+  const TAU = Math.PI * 2;
+  let fxW = 0, fxH = 0;
+  const sizeFx = () => {
+    const k = Math.min(devicePixelRatio || 1, 2);
+    fxW = stage.clientWidth; fxH = stage.clientHeight;
+    fxEl.width = Math.round(fxW * k); fxEl.height = Math.round(fxH * k);
+    fx.setTransform(k, 0, 0, k, 0, 0);
+  };
+  // cada estação conhece as 6 mais próximas: viagem curta parece viagem de verdade
+  list.forEach(s => { s.near = list.filter(o => o !== s).sort((a, b) => Math.hypot(a.x - s.x, a.y - s.y) - Math.hypot(b.x - s.x, b.y - s.y)).slice(0, 6); });
+
+  // pontos em trânsito: uma curva de A até B, cabeça clara e rastro laranja. `from` é um ponto fixo da tela
+  // (uma linha do feed); `a` é uma estação. Ao chegar, um anel se abre no destino
+  const packs = [], rings = [];
+  const pos = (p, u) => {
+    const [ax, ay] = p.from || scr(p.a), [bx, by] = scr(p.b), v = 1 - u;
+    const cx = (ax + bx) / 2 - (by - ay) * p.bend, cy = (ay + by) / 2 + (bx - ax) * p.bend;
+    return [v * v * ax + 2 * v * u * cx + u * u * bx, v * v * ay + 2 * v * u * cy + u * u * by];
+  };
+  const drawPacks = dt => {
+    fx.globalCompositeOperation = "lighter"; fx.lineCap = "round";
+    for (let i = packs.length - 1; i >= 0; i--) {
+      const p = packs[i]; p.t += dt / p.dur;
+      const t = Math.min(1, p.t), u = p.from ? 1 - Math.pow(1 - t, 3) : t * t * (3 - 2 * t);
+      const [hx, hy] = pos(p, u);
+      let x0 = hx, y0 = hy;
+      for (let k = 1; k <= 8; k++) {
+        const [x1, y1] = pos(p, Math.max(0, u - k * 0.03));
+        fx.strokeStyle = `rgba(255,90,31,${(0.55 * (1 - k / 9)).toFixed(3)})`; fx.lineWidth = 1.9 - k * 0.13;
+        fx.beginPath(); fx.moveTo(x0, y0); fx.lineTo(x1, y1); fx.stroke();
+        x0 = x1; y0 = y1;
+      }
+      fx.fillStyle = "rgba(255,90,31,.22)"; fx.beginPath(); fx.arc(hx, hy, 5, 0, TAU); fx.fill();
+      fx.fillStyle = "rgba(255,226,200,.95)"; fx.beginPath(); fx.arc(hx, hy, 1.5, 0, TAU); fx.fill();
+      if (p.t >= 1) { packs.splice(i, 1); rings.push({ s: p.b, t: 0 }); if (p.land) p.land(); }
+    }
+    for (let i = rings.length - 1; i >= 0; i--) {
+      const r = rings[i]; r.t += dt / 0.7;
+      if (r.t >= 1) { rings.splice(i, 1); continue; }
+      const [x, y] = scr(r.s), e = 1 - Math.pow(1 - r.t, 3);
+      fx.strokeStyle = `rgba(255,90,31,${(0.6 * (1 - r.t)).toFixed(3)})`; fx.lineWidth = 1.2;
+      fx.beginPath(); fx.arc(x, y, 4 + e * 14, 0, TAU); fx.stroke();
+    }
+    fx.globalCompositeOperation = "source-over";
+  };
+
+  // entrada: tempos em segundos a partir do html.go. As linhas de baixo são lidas primeiro, para o título
+  // subir num espaço que já esvaziou
+  const T_READ = 0.42, T_STEP = 0.0095, T_FLY = 0.72;
+  const intro = { on: false, t: 0, lines: [], end: 0, font: "", max: 0 };
+  const startIntro = () => {
+    const mob = !wide(), fs = mob ? 9 : 12, n = list.length, sr = stage.getBoundingClientRect();
+    const x0 = Math.max(16, $("#heroLive").getBoundingClientRect().left - sr.left);
+    // o feed ocupa a faixa acima do texto, em colunas; se a faixa for baixa demais (tela curta, celular) ele
+    // desce por trás do texto, e por isso a leitura vai de baixo para cima
+    const band = $("#heroLive").getBoundingClientRect().top - sr.top - 84 - 24, lh0 = mob ? 10.5 : 13.5;
+    const colW = mob ? fxW - x0 * 2 : Math.max(300, Math.min(440, (fxW - x0 * 2) / 3));
+    const maxCols = Math.max(1, Math.floor((fxW - x0 * 2) / colW));
+    const cols = Math.min(maxCols, Math.max(1, Math.ceil(n / Math.max(1, Math.floor(band / lh0))))), rows = Math.ceil(n / cols);
+    const lh = Math.min(lh0, (fxH - 110) / rows);
+    intro.font = `500 ${fs}px "Geist Mono", ui-monospace, monospace`;
+    intro.max = Math.floor((colW - 20) / (fs * 0.6));
+    intro.lines = list.map((s, i) => {
+      const col = Math.floor(i / rows), row = i % rows;
+      return { s, x: x0 + col * colW, y: 84 + row * lh, k: row * cols + col, text: `{"estacao": ${s.n}, "nome": "${s.name}", "vagas": ${s.cap}}`.slice(0, intro.max), t0: T_READ + ((rows - 1 - row) * cols + col) * T_STEP, sent: false, land: 0 };
+    });
+    intro.end = T_READ + (n - 1) * T_STEP + T_FLY + 0.35;
+    intro.t = 0; intro.start = performance.now(); intro.on = true;
+    // desfecho garantido: se os quadros não vierem (aba ocluída, abertura fora da tela), o véu sai mesmo assim
+    setTimeout(endIntro, (intro.end + 0.7) * 1000 + 500);
+  };
+  const endIntro = () => {
+    if (!intro.on) return;
+    intro.on = false;
+    root.classList.remove("fx");
+    list.forEach(s => nodes.get(s.n).classList.add("lit"));
+    for (let i = packs.length - 1; i >= 0; i--) if (packs[i].from) packs.splice(i, 1);
+    fx.clearRect(0, 0, fxW, fxH);
+  };
+  const drawIntro = () => {
+    // o tempo é o do relógio, não a soma dos quadros: num aparelho lento a entrada pula quadros mas não atrasa
+    // em relação ao título, que entra por CSS
+    const I = intro; I.t = (performance.now() - I.start) / 1000;
+    const t = I.t;
+    // véu: tudo escuro; cada estação que recebeu o seu dado abre um clarão nas ruas em volta
+    fx.globalAlpha = t < I.end ? 1 : Math.max(0, 1 - (t - I.end) / 0.7);
+    fx.fillStyle = "#0e0d0b"; fx.fillRect(0, 0, fxW, fxH);
+    fx.globalAlpha = 1;
+    fx.globalCompositeOperation = "destination-out";
+    I.lines.forEach(L => {
+      if (!L.land) return;
+      const k = Math.min(1, (t - L.land) / 1.1), r = 30 + 340 * (1 - Math.pow(1 - k, 3)), [x, y] = scr(L.s);
+      const g = fx.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, "rgba(0,0,0,1)"); g.addColorStop(0.55, "rgba(0,0,0,.72)"); g.addColorStop(1, "rgba(0,0,0,0)");
+      fx.fillStyle = g; fx.beginPath(); fx.arc(x, y, r, 0, TAU); fx.fill();
+    });
+    fx.globalCompositeOperation = "source-over";
+    // o feed: cada linha é digitada, fica laranja quando é lida e some quando o ponto parte
+    fx.font = I.font; fx.textBaseline = "middle";
+    I.lines.forEach(L => {
+      const a = t - L.k * 0.0028, out = t - L.t0;   // a última linha termina de ser digitada antes de a leitura começar
+      if (a <= 0 || out > 0.16) return;
+      fx.fillStyle = out > -0.09 ? `rgba(255,90,31,${out > 0 ? (1 - out / 0.16).toFixed(3) : 1})` : "rgba(239,234,225,.6)";
+      fx.fillText(L.text.slice(0, Math.ceil(L.text.length * Math.min(1, a / 0.12))), L.x, L.y);
+      if (out >= 0 && !L.sent) {
+        L.sent = true;
+        packs.push({ from: [L.x + 4, L.y], b: L.s, t: 0, dur: T_FLY, bend: (Math.random() - 0.5) * 0.5, land: () => { L.land = I.t; nodes.get(L.s.n).classList.add("lit"); } });
+      }
+    });
+    if (t > I.end + 0.7) endIntro();
+  };
+
+  // depois da entrada: uma viagem nova de tempos em tempos, até um teto (menor no celular)
+  let acc = 0;
+  const emit = dt => {
+    const big = wide(), gap = big ? 0.16 : 0.34, max = big ? 34 : 12;
+    acc = Math.min(acc + dt, gap * 2);
+    while (acc >= gap) {
+      acc -= gap;
+      if (packs.length >= max) continue;
+      const a = list[(Math.random() * list.length) | 0], b = a.near[(Math.random() * a.near.length) | 0];
+      packs.push({ a, b, t: 0, dur: 1.5 + Math.random() * 1.8, bend: (Math.random() - 0.5) * 0.7 });
+    }
+  };
+
+  // cursor (só com mouse): lente que clareia as ruas, coordenadas reais e a estação mais próxima, letras da
+  // manchete que alargam perto do cursor (eixo de largura da fonte) e botões que cedem na direção dele
+  const fine = !!fx && matchMedia("(hover: hover) and (pointer: fine)").matches;
+  const lens = $("#heroLens"), hud = $("#heroHud");
+  const ptr = { x: 0, y: 0, lx: 0, ly: 0, on: false, link: false, hudT: 0 };
+  const chars = [], mags = [];
+  const M_UNIT = 11.6;   // metros por unidade do mapa (2000 unidades cobrem 0,2272° de longitude a 22,9° S)
+  const measure = () => {
+    const r = stage.getBoundingClientRect();
+    chars.forEach(c => { c.e.style.fontVariationSettings = ""; c.f = 0; });
+    mags.forEach(m => { m.e.style.transform = ""; m.x = m.y = 0; });
+    chars.forEach(c => { const b = c.e.getBoundingClientRect(); c.x = b.left + b.width / 2 - r.left; c.y = b.top + b.height / 2 - r.top; });
+    mags.forEach(m => { const b = m.e.getBoundingClientRect(); m.cx = b.left + b.width / 2 - r.left; m.cy = b.top + b.height / 2 - r.top; });
+    // caixa do texto da manchete: em cima dela as coordenadas somem, para não escrever por cima das letras
+    const xs = chars.map(c => c.x), ys = chars.map(c => c.y);
+    ptr.box = chars.length ? [Math.min(...xs) - 30, Math.min(...ys) - 60, Math.max(...xs) + 30, Math.max(...ys) + 150] : null;
+  };
+  if (fine) {
+    // as letras viram spans; o H1 guarda a frase inteira para o leitor de tela
+    const head = $(".hero-head");
+    head.setAttribute("aria-label", $$(".ln", head).map(l => l.textContent).join(" "));
+    $$(".ln", head).forEach(l => l.setAttribute("aria-hidden", "true"));
+    $$(".ln:not(.hero-pun) > span", head).forEach(line => {
+      const txt = line.textContent; line.textContent = "";
+      [...txt].forEach(ch => { const e = h("span"); e.textContent = ch; line.appendChild(e); chars.push({ e, x: 0, y: 0, f: 0 }); });
+    });
+    $$(".hero-act .pill").forEach(e => { e.classList.add("mag"); mags.push({ e, cx: 0, cy: 0, x: 0, y: 0 }); });
+    stage.addEventListener("pointermove", e => {
+      if (e.pointerType !== "mouse") return;
+      const r = stage.getBoundingClientRect();
+      ptr.x = e.clientX - r.left; ptr.y = e.clientY - r.top;
+      if (!ptr.on) { ptr.on = true; ptr.lx = ptr.x; ptr.ly = ptr.y; measure(); stage.classList.add("aim"); }
+      const b = ptr.box, link = !!(e.target.closest && e.target.closest("a, button")) || (!!b && heroP < 0.02 && ptr.x > b[0] && ptr.x < b[2] && ptr.y > b[1] && ptr.y < b[3]);
+      if (link !== ptr.link) { ptr.link = link; stage.classList.toggle("on-link", link); }
+    });
+    stage.addEventListener("pointerleave", () => { ptr.on = false; stage.classList.remove("aim"); });
+    addEventListener("resize", () => { if (ptr.on) measure(); });
+  }
+  const pointerStep = (dt, now) => {
+    const k = Math.min(1, dt * 12);
+    if (ptr.on) {
+      ptr.lx += (ptr.x - ptr.lx) * k; ptr.ly += (ptr.y - ptr.ly) * k;
+      lens.style.transform = `translate3d(${ptr.lx.toFixed(1)}px, ${ptr.ly.toFixed(1)}px, 0)`;
+      const flip = ptr.x > fxW - 280;
+      hud.style.transform = `translate3d(${(ptr.x + (flip ? -18 : 18)).toFixed(1)}px, ${(ptr.y + 20).toFixed(1)}px, 0)${flip ? " translateX(-100%)" : ""}`;
+      if (now - ptr.hudT > 70) {
+        ptr.hudT = now;
+        const mx = (ptr.x - cam.x) / cam.z, my = (ptr.y - cam.y) / cam.z;
+        const lon = GEO.lon0 + mx / GEO.w * (GEO.lon1 - GEO.lon0), lat = GEO.lat1 - my / GEO.h * (GEO.lat1 - GEO.lat0);
+        let best = null, bd = 1e9;
+        list.forEach(s => { const d = Math.hypot(s.x - mx, s.y - my); if (d < bd) { bd = d; best = s; } });
+        const m = bd * M_UNIT, deg = v => Math.abs(v).toFixed(4).replace(".", ",");
+        hud.firstElementChild.textContent = `${deg(lat)}° ${lat < 0 ? "S" : "N"} · ${deg(lon)}° ${lon < 0 ? "O" : "L"}`;
+        hud.lastElementChild.textContent = `${m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1).replace(".", ",")} km`} · ${best.name}`;
+      }
+    }
+    // a manchete só reage enquanto está parada no lugar (antes de a rolagem levar o texto embora)
+    const live = ptr.on && heroP < 0.02, kc = Math.min(1, dt * 9);
+    chars.forEach(c => {
+      const tg = live ? Math.pow(Math.max(0, 1 - Math.hypot(c.x - ptr.x, c.y - ptr.y) / 230), 1.6) : 0;
+      let f = c.f + (tg - c.f) * kc;
+      if (f < 0.004) f = 0;
+      if (Math.abs(f - c.f) < 0.002 && !(f === 0 && c.f !== 0)) return;
+      c.f = f;
+      c.e.style.fontVariationSettings = f ? `"wdth" ${(80 + 20 * f).toFixed(1)}, "opsz" 96` : "";
+    });
+    mags.forEach(m => {
+      const dx = ptr.x - m.cx, dy = ptr.y - m.cy, near = live && Math.hypot(dx, dy) < 120;
+      const tx = near ? dx * 0.22 : 0, ty = near ? dy * 0.32 : 0;
+      const x = m.x + (tx - m.x) * kc, y = m.y + (ty - m.y) * kc;
+      if (Math.abs(x - m.x) < 0.02 && Math.abs(y - m.y) < 0.02) return;
+      m.x = x; m.y = y;
+      m.e.style.transform = Math.abs(x) < 0.05 && Math.abs(y) < 0.05 ? "" : `translate3d(${x.toFixed(2)}px, ${y.toFixed(2)}px, 0)`;
+    });
+  };
+
+  // um laço só, que para quando a abertura sai da tela ou a aba fica em segundo plano
+  let fxOn = false, fxRaf = 0, fxLast = 0, heroSeen = false;
+  const frame = now => {
+    fxRaf = requestAnimationFrame(frame);
+    const dt = Math.min(0.05, Math.max(0, (now - fxLast) / 1000)); fxLast = now;
+    fx.clearRect(0, 0, fxW, fxH);
+    if (intro.on) drawIntro(); else emit(dt);
+    drawPacks(dt);
+    if (fine) pointerStep(dt, now);
+  };
+  const fxPlay = on => {
+    if (!fx || on === fxOn) return;
+    fxOn = on; cancelAnimationFrame(fxRaf);
+    if (on) { fxLast = performance.now(); fxRaf = requestAnimationFrame(frame); }
+  };
+  if (fx) {
+    sizeFx();
+    addEventListener("resize", sizeFx);
+    new IntersectionObserver(([e]) => { heroSeen = e.isIntersecting; fxPlay(heroSeen && !document.hidden); }).observe($(".hero"));
+    document.addEventListener("visibilitychange", () => fxPlay(heroSeen && !document.hidden));
+    // a entrada só toca se o html ainda está esperando (pre sem go): o véu cobre o mapa desde já
+    if (root.classList.contains("pre") && !root.classList.contains("go")) {
+      root.classList.add("fx");
+      fx.fillStyle = "#0e0d0b"; fx.fillRect(0, 0, fxW, fxH);
+      document.addEventListener("hero:go", () => { startIntro(); fxPlay(true); }, { once: true });
+    }
+  }
+  if (window.__heroReady) window.__heroReady();
 
   /* ---------- 01 · quem ---------- */
   $("#whoFacts").innerHTML = D.facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
@@ -920,7 +1162,7 @@
   // longo da linha, então pontos vizinhos andam sempre juntos e a linha nunca dobra em quina.
   // Uma ponta sai um pouco antes da outra, e a linha entra no núcleo como um fio sendo puxado.
   // O desenho final passa por uma spline (Catmull-Rom), então toda curva é contínua e sem ângulos.
-  const LP = 16, TAU = Math.PI * 2;   // pontos por linha: a suavização Catmull-Rom mantém a curva redonda com 16
+  const LP = 16;   // pontos por linha: a suavização Catmull-Rom mantém a curva redonda com 16
   let lineKey = "", gCoreEl = null;
   const unwrap = arr => { for (let i = 1; i < arr.length; i++) { while (arr[i] - arr[i - 1] > Math.PI) arr[i] -= TAU; while (arr[i] - arr[i - 1] < -Math.PI) arr[i] += TAU; } return arr; };
   const lineSetup = () => {
@@ -1176,17 +1418,18 @@
 
   // entrada da abertura: o texto e as estações entram por CSS (html.pre → html.go, no index.html e no v5.css).
   // Aqui só a câmera assenta sobre a rede; como ela lê heroP a cada quadro, rolar no meio não quebra nada
-  const root = document.documentElement;
   if (root.classList.contains("pre")) {
-    const cam = { m: 1.07 };
-    camM = cam.m; camera(heroP);
-    const settle = () => gsap.to(cam, { m: 1, duration: 2.4, ease: "expo.out", onUpdate: () => { camM = cam.m; camera(heroP); } });
+    const zoom = { m: 1.07 };
+    camM = zoom.m; camera(heroP);
+    const settle = () => gsap.to(zoom, { m: 1, duration: 2.4, ease: "expo.out", onUpdate: () => { camM = zoom.m; camera(heroP); } });
     if (root.classList.contains("go")) settle(); else document.addEventListener("hero:go", settle, { once: true });
   }
 
   // 00: a câmera desce até o Centro enquanto a abertura fica grudada; o texto sai antes
   ScrollTrigger.create({ trigger: ".hero", start: "top top", end: "bottom bottom", onUpdate: s => { heroP = s.progress; camera(heroP); } });
   gsap.to(".hero-copy", { yPercent: -18, opacity: 0, ease: "none", scrollTrigger: { trigger: ".hero", start: "top top", end: "28% top", scrub: true } });
+  // as três linhas da manchete saem em velocidades diferentes, abrindo como um leque
+  [-5, 3, 9].forEach((x, i) => gsap.to(`.hero-head .ln:nth-child(${i + 1})`, { xPercent: x, ease: "none", scrollTrigger: { trigger: ".hero", start: "top top", end: "28% top", scrub: true } }));
 
   // 02 + 03: a viagem inteira é um número só
   tripST = ScrollTrigger.create({ trigger: tripRun, start: "top top", end: "bottom bottom", onUpdate: s => tripTo(s.progress) });
