@@ -134,139 +134,91 @@ export function createPipe({ canvas, labels, reduce, stations = [], on = {}, map
   const ORANGE_C = [1, 0.45, 0.18], DUST = [0.55, 0.5, 0.44], LIME_C = [0.85, 1, 0.35];
   const cellPos = (x, kSt) => { const col = kSt % 13, row = 4 - Math.floor(kSt / 13); return [x + 0.03, (row + 0.5) / 5 * SH, SD / 2 - (col + 0.5) / 13 * SD]; };
 
-  // o mini mapa do Gêmeo: uma lâmina acima da janela com as 65 estações nas posições reais. As partículas
-  // da publicação voam de cada célula até a sua estação; ela acende quando a partícula pousa
-  const MAP = { x: -3.4, y: 2.5, z: -4.2, w: 6.0, d: 2.8 };
-  const mapG = new THREE.Group(); mapG.position.set(MAP.x, MAP.y, MAP.z); group.add(mapG);
-  const mapPlateM = new THREE.MeshBasicMaterial({ color: 0x0f120c, transparent: true, opacity: 0, depthWrite: false });
-  const mapPlate = new THREE.Mesh(new THREE.PlaneGeometry(MAP.w + 0.5, MAP.d + 0.4).rotateX(-Math.PI / 2), mapPlateM); mapG.add(mapPlate);
-  // o corpo da base: uma lâmina com espessura, como a de um notebook
-  const BT = 0.2, slabGeo = new THREE.BoxGeometry(MAP.w + 0.5, BT, MAP.d + 0.4).translate(0, -BT / 2 - 0.005, 0);
-  const slab = new THREE.Mesh(slabGeo, new THREE.MeshLambertMaterial({ color: 0x23221d, emissive: 0x0b0c08 }));
-  mapG.add(slab);
-  // as arestas do corpo, bem finas, para a espessura ler contra o fundo escuro
-  const slabEdgeM = new THREE.LineBasicMaterial({ color: 0xe6ff57, transparent: true, opacity: 0.22 });
-  mapG.add(new THREE.LineSegments(new THREE.EdgesGeometry(slabGeo), slabEdgeM));
-  const mapEdgeM = new THREE.LineBasicMaterial({ color: 0xe6ff57, transparent: true, opacity: 0 });
-  mapG.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(MAP.w + 0.5, MAP.d + 0.4).rotateX(-Math.PI / 2)), mapEdgeM));
-  const sx = stations.map(q => q[0]), sz = stations.map(q => q[1]);
-  const bx0 = sx.length ? Math.min(...sx) : 0, bx1 = sx.length ? Math.max(...sx) : 1, bz0 = sz.length ? Math.min(...sz) : 0, bz1 = sz.length ? Math.max(...sz) : 1;
-  const sc = Math.min(MAP.w / Math.max(1e-6, bx1 - bx0), MAP.d / Math.max(1e-6, bz1 - bz0));
-  const stPos = stations.map(([x, z]) => [MAP.x + (x - (bx0 + bx1) / 2) * sc, MAP.y + 0.02, MAP.z + (z - (bz0 + bz1) / 2) * sc]);
-  const SN = Math.max(1, stations.length), sp = new Float32Array(SN * 3), sHit = new Float32Array(SN).fill(-99), sOcc = new Float32Array(SN).fill(0.5);
-  stPos.forEach((q, k) => sp.set([q[0] - MAP.x, q[1] - MAP.y, q[2] - MAP.z], k * 3));
-  const sg = new THREE.BufferGeometry(); sg.setAttribute("position", new THREE.BufferAttribute(sp, 3));
-  sg.setAttribute("aHit", new THREE.BufferAttribute(sHit, 1)); sg.setAttribute("aOcc", new THREE.BufferAttribute(sOcc, 1));
-  const uMap = { value: 1 }, uRing = { value: 0 }, uPulse = { value: -99 };
-  const sm = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
-    uniforms: { uT, uPx, uMap, uRing, uPulse },
-    vertexShader: `uniform float uT, uPx, uRing, uPulse; attribute float aHit, aOcc; varying float vH, vO, vP;
-      void main() { vH = exp(-max(0., uT - aHit) * 2.2) * step(aHit, uT); vO = aOcc; vP = exp(-max(0., uT - uPulse) * 1.6) * step(uPulse, uT); vec4 mv = modelViewMatrix * vec4(position, 1.);
-        gl_Position = projectionMatrix * mv; gl_PointSize = uPx * (.26 + .16 * vH + (uRing + vP * .8) * .34 * (.4 + aOcc)) / -mv.z; }`,
-    fragmentShader: `uniform float uMap, uRing, uT; varying float vH, vO, vP;
-      void main() { vec2 q = gl_PointCoord - .5; float d = length(q);
-        float dot_ = smoothstep(.2, .12, d), ring = smoothstep(.06, 0., abs(d - .36 - .06 * sin(uT * 2. + vO * 6.))) * max(uRing, vP);
-        vec3 c = mix(vec3(.9, 1., .34), vec3(1., .97, .9), vH);
-        float a = (dot_ * (.55 + .45 * vH) + ring * .7 + smoothstep(.5, .0, d) * vH * .5) * uMap; if (a < .01) discard; gl_FragColor = vec4(c, a); }` });
-  const stPts = new THREE.Points(sg, sm); stPts.frustumCulled = false; stPts.renderOrder = 60; mapG.add(stPts);
-  // o título da camada fica ao lado do canto da frente da base, longe da tela do Gêmeo
-  const mapLbl = sprite("ArcGIS · camada", "#e6ff57"); mapLbl.material.opacity = 0; mapLbl.scale.set(2.5, 0.47, 1); mapLbl.position.set((MAP.w + 0.5) / 2 + 0.2, 0.12, MAP.d / 2 - 0.1); mapLbl.center.set(0, 0.5); mapG.add(mapLbl); mapLbl.renderOrder = 70;
-  let mapOn = 1, mapWant = 1, ringWant = 0, deltaWant = 0.5, hitQ = [];
-
-  // o Gêmeo: uma tela presa na borda de trás da camada, como a tampa de um notebook, virada de frente.
-  // Ela se abre quando a seção aparece; a cada publicação, cada estação da camada sobe até o seu ponto na
-  // tela e uma varredura passa por ela quando tudo chega (no mesmo instante do pacote ArcGIS → Gêmeo)
-  const SW = MAP.w + 0.5, HS = 2.7;
-  const hinge = new THREE.Group(); hinge.position.set(0, 0, -(MAP.d + 0.4) / 2); mapG.add(hinge);
-  const scr = new THREE.Group(); hinge.add(scr);
-  // o display: um verde quase preto com degradê, vinheta e linhas de varredura bem fracas, descendo devagar
-  const scrM = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true,
-    uniforms: { uT },
-    vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
-    fragmentShader: `uniform float uT; varying vec2 vUv;
-      void main() { vec3 c = mix(vec3(.028, .036, .022), vec3(.05, .064, .036), vUv.y);
-        float vig = smoothstep(1.15, .25, length((vUv - .5) * vec2(1.1, 1.5)));
-        float sl = .5 + .5 * sin(vUv.y * 180. - uT * 2.2), bq = fract(vUv.y - uT * .06) - .5, band = exp(-bq * bq * 40.);
-        c = c * (.55 + .45 * vig) + vec3(.9, 1., .34) * (sl * .018 + band * .02);
-        gl_FragColor = vec4(c, .97); }` });
-  const scrGeo = new THREE.PlaneGeometry(SW, HS).translate(0, HS / 2, 0);
-  // a moldura (bezel) em volta do display e a dobradiça
-  const LT = 0.12, lidGeo = new THREE.BoxGeometry(SW + 0.22, HS + 0.22, LT).translate(0, HS / 2, -LT / 2 - 0.012);
-  const bezel = new THREE.Mesh(lidGeo, new THREE.MeshLambertMaterial({ color: 0x23221d, emissive: 0x0b0c08 }));
-  bezel.renderOrder = 54; scr.add(bezel);
-  scr.add(new THREE.LineSegments(new THREE.EdgesGeometry(lidGeo), slabEdgeM));
-  const hingeBar = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, SW * 0.86, 12).rotateZ(Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x2c2a25 }));
-  hingeBar.position.set(0, -0.06, -(MAP.d + 0.4) / 2 + 0.02); hingeBar.scale.set(1, 1.6, 1.6); mapG.add(hingeBar);
-  // a tela vai por baixo de tudo o que é desenhado nela (títulos, linhas, estações)
-  const scrMesh = new THREE.Mesh(scrGeo, scrM); scrMesh.renderOrder = 55; scr.add(scrMesh);
-  const scrEdgeM = new THREE.LineBasicMaterial({ color: 0xe6ff57, transparent: true, opacity: 0.6 });
-  scr.add(new THREE.LineSegments(new THREE.EdgesGeometry(scrGeo), scrEdgeM));
-  // a barra de título e umas linhas finas de interface
-  const ui = [];
-  for (const y of [HS - 0.34]) ui.push(-SW / 2, y, 0.002, SW / 2, y, 0.002);
-  const uiM = new THREE.LineBasicMaterial({ color: 0xe6ff57, transparent: true, opacity: 0.22 });
-  scr.add(new THREE.LineSegments(new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(ui, 3)), uiM));
-  // a barra de progresso até a próxima atualização: enche no relógio do fluxo e zera quando a camada chega
-  const progM = new THREE.MeshBasicMaterial({ color: 0xe6ff57, transparent: true, opacity: 0.7, depthWrite: false });
-  const prog = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.028).translate(0.5, 0, 0), progM);
-  prog.position.set(-SW / 2, HS - 0.34, 0.012); prog.renderOrder = 62; scr.add(prog);
-  const gemLbl = sprite("Gêmeo Digital", "#e6ff57"); gemLbl.scale.set(2.6, 0.49, 1); gemLbl.position.set(-SW / 2 + 1.4, HS - 0.19, 0.01); scr.add(gemLbl);
-  const liveLbl = sprite("● ao vivo", "#efeae1"); liveLbl.scale.set(1.9, 0.36, 1); liveLbl.position.set(SW / 2 - 0.95, HS - 0.19, 0.01); scr.add(liveLbl);
-  // os títulos olham sempre para a câmera e, com a tela inclinada, metade deles ficaria atrás da moldura
-  gemLbl.renderOrder = liveLbl.renderOrder = 70; gemLbl.material.depthTest = liveLbl.material.depthTest = false;
-  // as estações na tela: o mesmo desenho da camada, de pé (a profundidade da camada vira a altura da tela)
-  const gp = new Float32Array(SN * 3), gHit = new Float32Array(SN).fill(-99);
-  const scrY = z => HS * 0.47 - (z / (MAP.d / 2)) * HS * 0.36;
-  stPos.forEach((q, k) => gp.set([q[0] - MAP.x, scrY(q[2] - MAP.z), 0.02], k * 3));
-  const gg = new THREE.BufferGeometry(); gg.setAttribute("position", new THREE.BufferAttribute(gp, 3));
-  gg.setAttribute("aHit", new THREE.BufferAttribute(gHit, 1)); gg.setAttribute("aOcc", new THREE.BufferAttribute(sOcc, 1));
-  const uGem = { value: -99 };
-  const gm = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
-    uniforms: { uT, uPx, uGem },
-    vertexShader: `uniform float uT, uPx, uGem; attribute float aHit, aOcc; varying float vH, vO, vP;
-      void main() { vH = exp(-max(0., uT - aHit) * 2.) * step(aHit, uT); vO = aOcc; vP = exp(-max(0., uT - uGem) * 1.2) * step(uGem, uT);
-        vec4 mv = modelViewMatrix * vec4(position, 1.); gl_Position = projectionMatrix * mv; gl_PointSize = uPx * (.3 + .18 * vH + .5 * (.35 + aOcc) * (.35 + vP)) / -mv.z; }`,
-    fragmentShader: `uniform float uT; varying float vH, vO, vP;
-      void main() { float d = length(gl_PointCoord - .5);
-        float dot_ = smoothstep(.17, .1, d), ring = smoothstep(.05, 0., abs(d - .32 - .08 * sin(uT * 2.2 + vO * 6.))) * (.25 + .75 * vP);
-        vec3 c = mix(vec3(.9, 1., .34), vec3(1., .97, .9), vH);
-        float tw = .72 + .28 * sin(uT * 2.6 + vO * 37. + gl_FragCoord.x * .0);
-        float a = dot_ * (.6 + .4 * vH) * tw + ring * .65 + smoothstep(.5, 0., d) * vH * .45; if (a < .01) discard; gl_FragColor = vec4(c, a); }` });
-  const gemPts = new THREE.Points(gg, gm); gemPts.frustumCulled = false; gemPts.renderOrder = 61; scr.add(gemPts);
-  // o mapa de Niterói (ruas do OpenStreetMap) em verde, recortado na região das estações: o mesmo recorte
-  // vai deitado na camada e de pé na tela, então cada estação cai na rua certa nos dois
-  const mapMatB = new THREE.MeshBasicMaterial({ color: 0xe6ff57, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
-  const mapMatS = new THREE.MeshBasicMaterial({ color: 0xe6ff57, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
-  const baseMap = new THREE.Mesh(new THREE.PlaneGeometry(MAP.w + 0.5, MAP.d + 0.4).rotateX(-Math.PI / 2), mapMatB); baseMap.position.y = 0.006; baseMap.renderOrder = 58; mapG.add(baseMap);
-  const scrMapH = 2 * ((MAP.d + 0.4) / MAP.d) * HS * 0.36;
-  const scrMap = new THREE.Mesh(new THREE.PlaneGeometry(SW, scrMapH), mapMatS); scrMap.position.set(0, HS * 0.47, 0.006); scrMap.renderOrder = 57; scr.add(scrMap);
+  // dois painéis em pé, formato retrato, com o visual do mapa da abertura (fundo tinta, estações em laranja
+  // com halo, maiores quanto mais cheias). O da esquerda é a camada no ArcGIS: só os pontos, sobre uma grade.
+  // O da direita é o Gêmeo: os mesmos pontos sobre as ruas da cidade. As partículas da publicação voam da
+  // janela até a camada e, dali, cada estação segue para o seu lugar no mapa do Gêmeo
+  const PAN = { w: 2.5, h: 3.7 };
+  // o recorte retrato: centrado onde as estações se concentram (Centro e Icaraí); as poucas que ficam
+  // longe demais para o enquadramento não aparecem
+  const med = a => { const b = [...a].sort((x, y) => x - y); return b.length ? b[Math.floor(b.length / 2)] : 0; };
+  const mx = med(stations.map(q => q[0])), mz = med(stations.map(q => q[1])), asp = PAN.w / PAN.h;
+  const need = stations.map(([x, z]) => Math.max(Math.abs(x - mx) / (asp * 0.88), Math.abs(z - mz) / 0.88)).sort((a, b) => a - b);
+  const hh = Math.max(1e-6, need.length ? need[Math.min(need.length - 1, Math.floor(need.length * 0.86))] : 1), sc = (PAN.h / 2) / hh;
+  const SN = Math.max(1, stations.length), sp = new Float32Array(SN * 3), sOcc = new Float32Array(SN).fill(0.5), sIn = new Float32Array(SN);
+  const stLocal = stations.map(([x, z], k) => {
+    const lx = (x - mx) * sc, ly = PAN.h / 2 - (z - mz) * sc;
+    sIn[k] = Math.abs(lx) < PAN.w / 2 - 0.1 && Math.abs(ly - PAN.h / 2) < PAN.h / 2 - 0.1 ? 1 : 0;
+    sp.set([lx, ly, 0.03], k * 3); return [lx, ly, 0.03];
+  });
+  const uRing = { value: 0 }, uCyc = { value: 6 };
+  const PT = 0.09, bodyGeo = new THREE.BoxGeometry(PAN.w + 0.14, PAN.h + 0.14, PT).translate(0, PAN.h / 2, -PT / 2 - 0.006), bodyEdges = new THREE.EdgesGeometry(bodyGeo);
+  const faceGeo = new THREE.PlaneGeometry(PAN.w, PAN.h).translate(0, PAN.h / 2, 0);
+  const aOccAttr = new THREE.BufferAttribute(sOcc, 1);
+  const makePanel = ({ x, y, z, yaw, grid, streets }) => {
+    const rig = new THREE.Group(); rig.position.set(x, y, z); rig.rotation.set(-0.05, yaw, 0, "YXZ"); group.add(rig);
+    const pan = new THREE.Group(); rig.add(pan);
+    // corpo fino, com um fio creme na borda (ele acende um instante quando o painel recebe)
+    const bodyM = new THREE.MeshBasicMaterial({ color: 0x1d1b17, transparent: true });
+    const bodyMesh = new THREE.Mesh(bodyGeo, bodyM); bodyMesh.renderOrder = 54; pan.add(bodyMesh);
+    const edgeM = new THREE.LineBasicMaterial({ color: 0xefeae1, transparent: true, opacity: 0.3 });
+    pan.add(new THREE.LineSegments(bodyEdges, edgeM));
+    const uA = { value: 1 }, uPulse = { value: -99 };
+    const faceM = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, uniforms: { uA, uGrid: { value: grid ? 1 : 0 } },
+      vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
+      fragmentShader: `uniform float uA, uGrid; varying vec2 vUv;
+        void main() { float vig = smoothstep(1.2, .15, length((vUv - vec2(.5, .56)) * vec2(1.5, 1.15)));
+          vec3 c = mix(vec3(.047, .043, .038), vec3(.1, .092, .08), vig);
+          vec2 g = abs(fract(vUv * vec2(8., 12.) + .5) - .5) / fwidth(vUv * vec2(8., 12.));
+          c += vec3(.94, .92, .88) * (1. - min(min(g.x, g.y), 1.)) * .07 * uGrid;
+          gl_FragColor = vec4(c, .98 * uA); }` });
+    const faceMesh = new THREE.Mesh(faceGeo, faceM); faceMesh.renderOrder = 55; pan.add(faceMesh);
+    let mapM = null;
+    if (streets) { mapM = new THREE.MeshBasicMaterial({ color: 0xefeae1, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }); const m = new THREE.Mesh(faceGeo, mapM); m.position.z = 0.008; m.renderOrder = 57; pan.add(m); }
+    // as estações: acendem claras quando chegam, soltam um anel no pulso e vão apagando até a publicação seguinte
+    const sHit = new Float32Array(SN).fill(0), sg = new THREE.BufferGeometry();
+    sg.setAttribute("position", new THREE.BufferAttribute(sp, 3)); sg.setAttribute("aHit", new THREE.BufferAttribute(sHit, 1));
+    sg.setAttribute("aOcc", aOccAttr); sg.setAttribute("aIn", new THREE.BufferAttribute(sIn, 1));
+    const sm = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, depthTest: false,
+      uniforms: { uT, uPx, uA, uRing, uPulse, uCyc },
+      vertexShader: `uniform float uT, uPx, uPulse, uCyc; attribute float aHit, aOcc, aIn; varying float vH, vO, vP, vI, vF;
+        void main() { vH = exp(-max(0., uT - aHit) * 2.2) * step(aHit, uT); vO = aOcc; vI = aIn; vP = (uT - uPulse) / 1.1;
+          vF = 1. - smoothstep(.12, 1., clamp((uT - aHit) / uCyc, 0., 1.));
+          vec4 mv = modelViewMatrix * vec4(position, 1.); gl_Position = projectionMatrix * mv; gl_PointSize = uPx * (.36 + .44 * aOcc + .1 * vH) * (.82 + .18 * vF) / -mv.z; }`,
+      fragmentShader: `uniform float uA, uRing; varying float vH, vO, vP, vI, vF;
+        void main() { float d = length(gl_PointCoord - .5), lit = .16 + .84 * vF;
+          float core = smoothstep(.15, .12, d) * lit, halo = smoothstep(.36, .26, d) * .2 * vF;
+          float tp = clamp(vP, 0., 1.), ring = smoothstep(.035, 0., abs(d - (.16 + .3 * tp))) * (1. - tp) * step(0., vP) * step(vP, 1.);
+          ring = max(ring, smoothstep(.03, 0., abs(d - .3)) * uRing * .55);
+          vec3 c = mix(vec3(1., .353, .122), vec3(1., .93, .85), vH * .85);
+          float a = (max(core, halo) + ring * .9) * vI * uA; if (a < .01) discard; gl_FragColor = vec4(c, a); }` });
+    const pts = new THREE.Points(sg, sm); pts.frustumCulled = false; pts.renderOrder = 60; pan.add(pts);
+    const v3 = new THREE.Vector3();
+    return { rig, pan, x, y, z, bodyM, edgeM, uA, uPulse, mapM, sHit, sg, flash: -99,
+      world: (lx, ly, lz) => { v3.set(lx, ly, lz); pan.localToWorld(v3); return [v3.x, v3.y, v3.z]; } };
+  };
+  const pA = makePanel({ x: -3.75, y: 1.45, z: -4.0, yaw: 0.02, grid: true });
+  const pG = makePanel({ x: -0.75, y: 1.45, z: -3.2, yaw: -0.04, streets: true });
+  // as ruas de Niterói (OpenStreetMap), no mesmo recorte das estações, só no painel do Gêmeo
+  let mapFull = 0;
   {
-    const cxS = (bx0 + bx1) / 2, czS = (bz0 + bz1) / 2, hw = (MAP.w + 0.5) / (2 * sc), hd = (MAP.d + 0.4) / (2 * sc);
-    const vb = [(cxS - hw) * 100, (czS - hd) * 100, hw * 200, hd * 200], cw = 1400, ch = Math.round(cw * hd / hw);
+    const hw = (PAN.w / 2) / sc, hd = (PAN.h / 2) / sc, vb = [(mx - hw) * 100, (mz - hd) * 100, hw * 200, hd * 200], ch = 1400, cw = Math.round(ch * hw / hd);
     fetch(mapSrc).then(r => r.text()).then(t => {
-      const svgT = t.replace(/<svg[^>]*>/, m => m.replace(/viewBox="[^"]*"/, `viewBox="${vb.map(v => v.toFixed(1)).join(" ")}" width="${cw}" height="${ch}" preserveAspectRatio="none"`).replace('stroke="#000"', 'stroke="#fff"').replace(/<svg/, '<svg stroke-opacity="1"'));
+      const svgT = t.replace(/<svg[^>]*>/, m => m.replace(/viewBox="[^"]*"/, `viewBox="${vb.map(v => v.toFixed(1)).join(" ")}" width="${cw}" height="${ch}" preserveAspectRatio="none"`).replace('stroke="#000"', 'stroke="#fff"'));
       const url = URL.createObjectURL(new Blob([svgT], { type: "image/svg+xml" })), img = new Image();
       img.onload = () => {
         const c = document.createElement("canvas"); c.width = cw; c.height = ch; c.getContext("2d").drawImage(img, 0, 0, cw, ch); URL.revokeObjectURL(url);
         const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; tx.anisotropy = 4;
-        mapMatB.map = mapMatS.map = tx; mapMatB.needsUpdate = mapMatS.needsUpdate = true; mapMatB.opacity = 0.6; mapMatS.opacity = 0.55;
+        pG.mapM.map = tx; pG.mapM.needsUpdate = true; mapFull = 0.5;
       };
       img.src = url;
     }).catch(() => {});
   }
-  // o reflexo da tela na base: um brilho verde fraco que nasce na dobradiça e some para a frente
-  const gc = document.createElement("canvas"); gc.width = 4; gc.height = 128;
-  { const x = gc.getContext("2d"), gr = x.createLinearGradient(0, 0, 0, 128); gr.addColorStop(0, "rgba(230,255,87,.5)"); gr.addColorStop(1, "rgba(230,255,87,0)"); x.fillStyle = gr; x.fillRect(0, 0, 4, 128); }
-  const glowB = new THREE.Mesh(new THREE.PlaneGeometry(SW * 0.92, 1.3).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(gc), transparent: true, opacity: 0.16, depthWrite: false, blending: THREE.AdditiveBlending }));
-  glowB.position.set(0, 0.008, -(MAP.d + 0.4) / 2 + 0.65); glowB.renderOrder = 58; mapG.add(glowB);
-  // a varredura de recebimento: uma faixa limão que desce pela tela
-  const scanM = new THREE.MeshBasicMaterial({ color: 0xe6ff57, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true });
-  const scan = new THREE.Mesh(new THREE.PlaneGeometry(SW - 0.04, 0.08), scanM); scan.position.z = 0.015; scr.add(scan);
-  let openT = -1, openK = 0, mapFloat = 0;
-  const OPEN = -0.1, SHUT = Math.PI / 2 * 0.985;
-  const easeBack = t => { const c = 1.25; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
-  hinge.rotation.x = reduce ? OPEN : SHUT;
-  const gemWorld = new THREE.Vector3();
+  // a régua de baixo da camada: enche até a próxima atualização, no relógio do fluxo
+  const progM = new THREE.MeshBasicMaterial({ color: 0xff5a1f, transparent: true, opacity: 0.7, depthWrite: false });
+  const prog = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.028).translate(0.5, 0, 0), progM); prog.position.set(-PAN.w / 2, 0.014, 0.012); prog.renderOrder = 62; pA.pan.add(prog);
+  const CREAM_C = [1, 0.86, 0.72];
+  let ringWant = 0, deltaWant = 0.5, hitQ = [], openK = 0, mapFloat = 0;
 
   // o relógio da simulação: e conta snapshots; a publicação cai em 6k + 3 (meio minuto depois de cada
   // minuto cheio). speed é quantos segundos do fluxo passam em 1 s de tela: 1 é tempo real (um snapshot a
@@ -329,7 +281,7 @@ export function createPipe({ canvas, labels, reduce, stations = [], on = {}, map
     if (snapCam) { cp.copy(tp); ct.copy(tt); } else { cp.lerp(tp, k); ct.lerp(tt, k); }
     camera.position.copy(cp); camera.lookAt(ct);
   };
-  const anchors = { janela: new THREE.Vector3(), folga: new THREE.Vector3(), agora: new THREE.Vector3(), limpeza: new THREE.Vector3() };
+  const anchors = { janela: new THREE.Vector3(), folga: new THREE.Vector3(), agora: new THREE.Vector3(), limpeza: new THREE.Vector3(), gemeo: new THREE.Vector3(), arcgis: new THREE.Vector3() };
   const label = (el, a) => {
     if (!el) return;
     v.copy(a).project(camera);
@@ -356,18 +308,15 @@ export function createPipe({ canvas, labels, reduce, stations = [], on = {}, map
       for (let j = 0; j < SN * 2; j++) {
         const st = j % SN, x = xs1 - Math.random() * (xs1 - xs0), [ax, ay, az] = cellPos(x, st % 65);
         const delay = T.fly0 + (j / (SN * 2)) * (T.fly1 - T.fly0) + Math.random() * 0.08;
-        if (stPos[st]) { const [bx, by, bz] = stPos[st]; emit(ax, ay, az, bx, by, bz, delay, T.fly, ORANGE_C); hitQ.push([tS + delay + T.fly * 0.95, st]); }
+        if (sIn[st]) { const [bx, by, bz] = pA.world(stLocal[st][0], stLocal[st][1], 0.05); emit(ax, ay, az, bx, by, bz, delay, T.fly, ORANGE_C); hitQ.push([tS + delay + T.fly * 0.95, st, pA]); }
       }
-      // do ArcGIS para o Gêmeo: depois que a camada recebe, cada estação sobe até a tela
-      mapG.updateMatrixWorld(true);
-      for (let k = 0; k < SN; k++) {
-        const [ax, ay, az] = stPos[k];
-        gemWorld.set(gp[k * 3], gp[k * 3 + 1], gp[k * 3 + 2]); gemPts.localToWorld(gemWorld);
-        emit(ax, ay, az, gemWorld.x, gemWorld.y, gemWorld.z, T.gem - 0.62 + (k % 9) * 0.012, 0.62, LIME_C);
-        gHit[k] = tS + T.gem;
+      // do ArcGIS para o Gêmeo: cada estação da camada segue para o mesmo ponto no mapa da cidade e chega
+      // junto com o pacote ArcGIS → Gêmeo do fluxograma
+      for (let k = 0; k < SN; k++) if (sIn[k]) {
+        const A = pA.world(stLocal[k][0], stLocal[k][1], 0.05), B = pG.world(stLocal[k][0], stLocal[k][1], 0.05), d0 = T.gem - 0.7 + (k % 11) * 0.012;
+        emit(A[0], A[1], A[2], B[0], B[1], B[2], d0, 0.62, CREAM_C); hitQ.push([tS + d0 + 0.6, k, pG]);
       }
-      gg.attributes.aHit.needsUpdate = true;
-      uGem.value = tS + T.gem;
+      pA.flash = tS + T.agol; pG.flash = tS + T.gem; pG.uPulse.value = tS + T.gem;
     }
   };
   const draw = (dt, snap) => {
@@ -375,36 +324,35 @@ export function createPipe({ canvas, labels, reduce, stations = [], on = {}, map
     uT.value = tS;
     info = update(snap);
     events(snap);
-    // o mapa aparece nos passos da camada e do Gêmeo; os anéis por ocupação só no último
-    mapOn += (mapWant - mapOn) * (snap ? 1 : 1 - Math.exp(-dt * 3));
-    uMap.value = mapOn; uRing.value += (ringWant - uRing.value) * (snap ? 1 : 1 - Math.exp(-dt * 3));
-    // a tampa abre uma vez, quando a seção aparece; depois só a varredura passa a cada recebimento
-    // a tampa abre sempre que a seção entra na tela (stop() a fecha de novo quando ela sai)
-    // a tampa abre quando o notebook já está perto do centro da tela (o fim da entrada da seção) e fecha
-    // na saída antes de ele chegar à borda de cima; rolar de volta reabre
-    // a rolagem só marca o alvo; a tampa vai até ele amortecida (cerca de meio segundo), então um giro
-    // brusco da roda do mouse não vira um tranco. Sem passar do ponto: a curva só acelera e freia
+    uRing.value += (ringWant - uRing.value) * (snap ? 1 : 1 - Math.exp(-dt * 3));
+    uCyc.value = 60 / speed;   // uma publicação por minuto do fluxo, em segundos de tela
+    // o painel chega com a rolagem: sobe, vira de frente e acende, perto do centro da tela; na saída volta
+    // pelo mesmo caminho. A rolagem só marca o alvo e o movimento vai até ele amortecido, sem tranco
     const lidGoal = reduce ? 1 : sm01(0.72, 1, lidIn) * (1 - sm01(0.08, 0.4, lidOut));
     openK += (lidGoal - openK) * (snap || reduce ? 1 : 1 - Math.exp(-dt * 4.2));
     if (Math.abs(lidGoal - openK) < 0.0005) openK = lidGoal;
-    hinge.rotation.x = SHUT + (OPEN - SHUT) * (openK * openK * openK * (openK * (openK * 6 - 15) + 10));
-    // o notebook flutua bem de leve, para não parecer congelado entre uma publicação e outra
-    if (!reduce) { mapFloat = Math.sin(tS * 0.75) * 0.05; mapG.rotation.y = Math.sin(tS * 0.31) * 0.012; }
-    { const S = info, fr = Math.min(1, Math.max(0.001, (e - S.r) / 6)); prog.scale.x = SW * fr; progM.opacity = 0.35 + 0.45 * fr; }
-    const sc_ = (tS - uGem.value) / 0.75;
-    if (sc_ >= 0 && sc_ < 1) { scanM.opacity = 0.55 * (1 - sc_); scan.position.y = HS - 0.4 - sc_ * (HS - 0.6); } else scanM.opacity = 0;
-    liveLbl.material.opacity = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(tS * 3.2));
-    { const g = Math.exp(-Math.max(0, tS - uGem.value) * 1.6) * (tS >= uGem.value ? 1 : 0); glowB.material.opacity = 0.14 + 0.3 * g; scrEdgeM.opacity = 0.5 + 0.4 * g; }
-    mapPlateM.opacity = 0.85 * mapOn; mapEdgeM.opacity = 0.55 * mapOn; mapLbl.material.opacity = mapOn; mapG.visible = mapOn > 0.01;
-    mapG.position.y = MAP.y + (1 - mapOn) * 0.4 + mapFloat;
+    // os dois chegam um depois do outro: primeiro a camada, logo em seguida o Gêmeo
+    if (!reduce) mapFloat = Math.sin(tS * 0.6) * 0.04;
+    [pA, pG].forEach((P, i) => {
+      const t = Math.min(1, Math.max(0, openK * 1.3 - i * 0.3)), q = t * t * t * (t * (t * 6 - 15) + 10);
+      P.pan.position.y = -(1 - q) * 1.3 + mapFloat * (i ? -1 : 1); P.pan.rotation.y = (1 - q) * 0.85;
+      const g = tS >= P.flash ? Math.exp(-(tS - P.flash) * 1.8) : 0;
+      P.uA.value = q; P.bodyM.opacity = q; P.edgeM.opacity = (0.3 + 0.55 * g) * q; if (P.mapM) P.mapM.opacity = mapFull * q; P.rig.visible = q > 0.004; P.q = q;
+    });
+    { const fr = Math.min(1, Math.max(0.001, (e - info.r) / 6)); prog.scale.x = PAN.w * fr; progM.opacity = (0.35 + 0.45 * fr) * (pA.q || 0); }
     U.uDelta.value += (deltaWant - U.uDelta.value) * (snap ? 1 : 1 - Math.exp(-dt * 4));
-    if (hitQ.length) { let ch = false; hitQ = hitQ.filter(([t, k]) => { if (tS >= t) { sHit[k] = t; ch = true; return false; } return true; }); if (ch) sg.attributes.aHit.needsUpdate = true; }
+    if (hitQ.length) hitQ = hitQ.filter(([t, k, P]) => { if (tS >= t) { P.sHit[k] = t; P.sg.attributes.aHit.needsUpdate = true; return false; } return true; });
     if (pDirty) { pDirty = false; for (const k of ["position", "aB", "aT", "aC"]) pg.attributes[k].needsUpdate = true; }
     place(snap ? 1 : 1 - Math.exp(-dt * 2.4), snap);
     anchors.janela.set(lx, SH + 0.55, -SD / 2);
     anchors.folga.set((info.a - e) * HF + 1.5 * HF, SH + 0.2, 0);
     anchors.agora.set(0.06, 2.55, SD / 2 + 0.2);
     anchors.limpeza.set((info.i0 - 3 - e) * HF, 0.75, SD / 2);
+    // os títulos são rótulos de texto, como os da janela: ficam acima do canto de cada painel e aparecem com ele
+    for (const [k, P] of [["arcgis", pA], ["gemeo", pG]]) {
+      P.rig.updateMatrixWorld(true); P.pan.localToWorld(anchors[k].set(-PAN.w / 2 - 0.07, PAN.h + 0.22, 0));
+      if (labels && labels[k]) labels[k].style.setProperty("--o", (P.q || 0).toFixed(3));
+    }
     renderer.render(scene, camera);
     if (labels) for (const k in anchors) label(labels[k], anchors[k]);
   };
@@ -422,9 +370,8 @@ export function createPipe({ canvas, labels, reduce, stations = [], on = {}, map
     // na tela estreita a câmera recua para a fila inteira caber
     camera.fov = W / H < 1.5 ? 40 : 30;
     narrow = W / H < 1.5;
-    // na tela estreita não sobra lugar livre para o título da camada (do lado sai da tela, na frente fica
-    // atrás do bloco): ali ele some e a tela do Gêmeo, que tem título, explica o conjunto
-    mapLbl.visible = !narrow;
+    // na tela estreita o painel fica menor, para caber abaixo do seletor de velocidade
+    [pA, pG].forEach((P, i) => { P.rig.scale.setScalar(narrow ? 0.6 : 1); P.rig.position.set(narrow ? (i ? -1.5 : -3.3) : P.x, P.y + (narrow ? 0.15 : 0), P.z); });
     camera.updateProjectionMatrix();
     uPx.value = H * Math.min(devicePixelRatio || 1, 1.25);
   };
@@ -446,7 +393,7 @@ export function createPipe({ canvas, labels, reduce, stations = [], on = {}, map
       for (let k = 0; k < 65; k++) { const f = list[k] == null ? 0.5 : list[k]; fillData[k * 4] = fillData[k * 4 + 1] = fillData[k * 4 + 2] = Math.round(Math.min(1, Math.max(0, f)) * 255); fillData[k * 4 + 3] = 255; }
       fillTex.needsUpdate = true;
       for (let k = 0; k < SN; k++) sOcc[k] = list[k] == null ? 0.5 : list[k];
-      sg.attributes.aOcc.needsUpdate = true; gg.attributes.aOcc.needsUpdate = true;
+      aOccAttr.needsUpdate = true;
     },
     // a última publicação: de quando a quando foi a janela que ela leu
     pub() { const r = info ? info.r : 63; return { at: T0 + r * 10000, de: T0 + (r - 33) * 10000, ate: T0 + (r - 3) * 10000, now: T0 + Math.floor(e) * 10000 }; },

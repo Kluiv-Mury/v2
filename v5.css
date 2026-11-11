@@ -128,9 +128,8 @@ p { margin: 0; }
 .hero-id span { color: var(--mute); font: 500 .76rem/1.4 var(--f-mono); letter-spacing: .14em; text-transform: uppercase; text-wrap: balance; }
 .hero-live span { text-wrap: balance; }
 /* a manchete ocupa duas linhas no desktop e respeita telas baixas (a altura também limita o corpo) */
-.hero-head { font: 800 clamp(2.9rem, min(7.6vw, 13.5vh), 7.4rem)/.88 var(--f-display); font-variation-settings: "wdth" 80, "opsz" 96; letter-spacing: -.035em; text-wrap: wrap; }
-.hero-head em { display: block; font-size: .74em; line-height: 1; letter-spacing: -.02em; text-wrap: balance; }
-.hero-pun { margin-top: .12em; padding-bottom: .2em; margin-bottom: -.1em; }
+.hero-name { font: 800 clamp(4.4rem, 15.5vw, 15.5rem)/.82 var(--f-display); font-variation-settings: "wdth" 80, "opsz" 96; letter-spacing: -.035em; }
+@media (max-width: 560px) { .hero-name { font-size: 25vw; } }
 .ln { display: block; overflow: clip; padding: 0 .14em .06em .08em; margin: 0 -.14em -.06em -.08em; }
 .ln > span { display: block; will-change: transform; }
 .hero-foot { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 1.4rem 4rem; align-items: end; margin-top: clamp(1.2rem, 3vh, 2.4rem); padding-top: 1.2rem; border-top: 1px solid var(--line-2); }
@@ -139,10 +138,9 @@ p { margin: 0; }
 /* entrada da abertura: só CSS e só transform e opacity. html.pre esconde, html.go toca (ver index.html).
    O título é o protagonista e sobe por linha; a frase em itálico chega um passo depois; o rodapé entra quando
    o título assenta; as estações acendem em onda a partir do Terminal (--d vem da distância, no v5.js) */
-.pre .hero-head .ln > span { transform: translateY(112%); }
+.pre .hero-name .ln > span { transform: translateY(112%); }
 .pre .hero-live, .pre .hero-id, .pre .hero-foot, .pre .hero-st g, .pre .hero-map img { opacity: 0; }
-.go .hero-head .ln > span { animation: h-rise 1.05s var(--ease) both; animation-delay: calc(var(--h0, 0ms) + 80ms + var(--i, 0) * 85ms); }
-.go .hero-head .hero-pun > span { animation-duration: .95s; animation-delay: calc(var(--h0, 0ms) + 400ms); }
+.go .hero-name .ln > span { animation: h-rise 1.05s var(--ease) both; animation-delay: calc(var(--h0, 0ms) + 80ms + var(--i, 0) * 85ms); }
 .go .hero-live, .go .hero-id { animation: h-fade .6s ease-out var(--h0, 0ms) both; }
 .go .hero-foot { animation: h-foot .75s var(--ease) calc(var(--h0, 0ms) + 560ms) both; }
 /* html.fx: o canvas conta a entrada (do feed ao mapa). O texto espera o feed começar a ser lido, o mapa já está
@@ -251,6 +249,9 @@ p { margin: 0; }
 .pipe-lbl [data-k="folga"] b { color: var(--cream-2); }
 .pipe-lbl [data-k="limpeza"] b { color: var(--mute); }
 .pipe-lbl .pl-chip { translate: -50% -100%; }
+/* os títulos dos painéis (camada no ArcGIS e Gêmeo): alinhados pelo canto, aparecem junto com cada um */
+.pipe-lbl [data-k="gemeo"], .pipe-lbl [data-k="arcgis"] { translate: 0 -100%; opacity: var(--o, 1); }
+.pipe-lbl [data-k="gemeo"] b, .pipe-lbl [data-k="arcgis"] b { color: var(--cream); }
 .pipe-lbl .pl-chip b { display: block; padding: .2rem .45rem; border-radius: 4px; background: rgba(239, 234, 225, .1); color: var(--cream); letter-spacing: .06em; opacity: 0; }
 .pcap-big { margin-top: 1.1rem; display: grid; grid-template-columns: auto 1fr; gap: .2rem 1rem; align-items: end; }
 .pcap-big b { grid-row: 1 / 3; font: 750 clamp(2.6rem, 4.6vw, 4.2rem)/.9 var(--f-display); font-variation-settings: "wdth" 84, "opsz" 96; letter-spacing: -.03em; color: var(--cream); font-variant-numeric: tabular-nums; }
@@ -292,6 +293,7 @@ p { margin: 0; }
   .pf-box { top: calc(var(--bar-h) + 6px); }
   #pipeGL, .pipe-lbl { left: 0; width: 100%; top: 21%; height: 42%; }
   .pipe-lbl i { display: none; }
+  .pipe-lbl [data-k="gemeo"], .pipe-lbl [data-k="arcgis"] { display: none; }
   .pipe-caps { left: var(--gut); right: var(--gut); width: auto; bottom: 64px; }
   .pcap h3 { font-size: clamp(1.6rem, 7vw, 2.2rem); }
   .pcap-p { font-size: .9rem; line-height: 1.5; }
@@ -648,7 +650,9 @@ p { margin: 0; }
 .graph.ready .link { transition: stroke .3s, opacity .3s; }
 .link.on { stroke: var(--orange); stroke-width: 1.6; }
 .graph.focus .link:not(.on) { opacity: .07; }
-.graph.morph .link { stroke: url(#gCore); stroke-width: 1.2; transition: none; stroke-linejoin: round; stroke-linecap: round; }
+.graph.morph .link { visibility: hidden; transition: none; }
+.g-fx { position: absolute; pointer-events: none; opacity: 0; mix-blend-mode: screen; }
+.graph.morph .g-fx { opacity: 1; }
 .comet { fill: none; stroke: var(--lime); stroke-width: 2.4; stroke-linecap: round; stroke-dasharray: .07 1.2; stroke-dashoffset: .07; pointer-events: none; }
 .comet.halo { stroke: rgba(230, 255, 87, .22); stroke-width: 9; }
 .g-col { grid-row: 1; display: grid; gap: 8px; align-content: center; }

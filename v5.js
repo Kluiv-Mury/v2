@@ -12,7 +12,7 @@
   if (hasGsap) gsap.registerPlugin(ScrollTrigger);
   // indicadores de estado: os Thinking Orbs (cópia local, sem dependências) dizem o que cada parte está
   // fazendo agora. Trocar de estado apaga o orb, troca e acende de novo, para não haver corte seco
-  const orbsLib = import("./orbs.js?v=202611110225").catch(() => null);
+  const orbsLib = import("./orbs.js?v=202611111620").catch(() => null);
   const orb = (svg, o) => {
     let cur = null, gen = 0, seen = false;
     // fora da tela o orb para de vez (a biblioteca só deixa de desenhar, mas o laço continuava)
@@ -318,7 +318,7 @@
   };
   if (fine) {
     // as letras viram spans; o H1 guarda a frase inteira para o leitor de tela
-    const head = $(".hero-head");
+    const head = $(".hero-name");
     head.setAttribute("aria-label", $$(".ln", head).map(l => l.textContent).join(" "));
     $$(".ln", head).forEach(l => l.setAttribute("aria-hidden", "true"));
     $$(".ln:not(.hero-pun) > span", head).forEach(line => {
@@ -597,7 +597,7 @@
       if (live.length >= 12) return setJams(live, "agora");
       return fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, `retrato · ${new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date(s.retrato))}`));
     }).catch(() => fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, "retrato")).catch(() => {}));
-    import("./scene.js?v=202611110225").then(m => {
+    import("./scene.js?v=202611111620").then(m => {
       trip = m.createTrip({ canvas: $("#tripGL"), stations: [...stations.values()], term, geo: window.KMGEO || { cams: [], gauges: [], routes: [] }, layers: lay, mapSrc: "mapa-niteroi.svg", tagEls: tripTags, onFocus: userLayer });
       trip.setBikes(); if (wazePts) trip.setWaze(wazePts); if (jams) paintJams();
       tripTo(tripP);
@@ -800,7 +800,7 @@
     let asked = false, seen = false;
     const loadPipe = () => {
       if (asked) return; asked = true;
-      import("./pipe.js?v=202611110225").then(m => {
+      import("./pipe.js?v=202611111620").then(m => {
         pipe = m.createPipe({ canvas: $("#pipeGL"), labels: lbl, reduce, stations: [...stations.values()].map(s => [s.x / 100, s.y / 100]), on: pipeOn });
         pipeFill(); pipe.pose(STEPS[Math.max(0, pipeAt)].pose); pipe.look(STEPS[Math.max(0, pipeAt)].look); pipe.setSpeed(pipeSpeed); pipeLid();
         if (seen) pipe.start();
@@ -843,7 +843,7 @@
   const loadLab = () => {
     if (labOn) return; labOn = true;
     const f = document.createElement("iframe");
-    f.src = "lab.html?v=202611110225"; f.title = "Gêmeo simplificado e pipeline do NitBike";
+    f.src = "lab.html?v=202611111620"; f.title = "Gêmeo simplificado e pipeline do NitBike";
     labOrb.set({ state: "working", size: 20 }); $("span", labWait).textContent = "carregando o laboratório…";
     f.addEventListener("load", () => { labWait.classList.add("gone"); setTimeout(() => labWait.remove(), 400); }, { once: true });
     labFrame.insertBefore(f, labWait);
@@ -1124,11 +1124,13 @@
   // cada nome da esfera nasce como cópia exata do botão (mesma pílula, mesmo número): a troca não se vê
   sph.innerHTML = sBtns.map(b => `<span class="${b.dataset.w ? "sw" : "st"}"><em></em><b>${b.firstChild.textContent}</b><small>${b.querySelector("i").textContent}</small></span>`).join("");
   graph.appendChild(sph);
+  // durante o globo as ligações são desenhadas num canvas por baixo dos nomes: dá brilho somado, rastro que
+  // afina e cabeça mais clara, coisas que o traço do SVG não faz. O SVG volta quando o grafo se refaz
+  const gfx = h("canvas", "g-fx"); gfx.setAttribute("aria-hidden", "true"); graph.insertBefore(gfx, sph);
+  let fxK = 1, fxO = [0, 0], lineRmax = 0;
   const sEls = $$("span", sph), sPill = sEls.map(s => s.firstChild), sNum = sEls.map(s => s.lastChild), gSvg = $("svg", graph);
   const NS_ = sEls.length, GA = Math.PI * (3 - Math.sqrt(5));
   // pontos espalhados por igual (espiral de Fibonacci); os trabalhos ficam numa faixa, as ferramentas no resto
-  // a ordem salta de 11 em 11 para os trabalhos (laranja) não se juntarem num polo só
-  const sDir = sEls.map((_, i) => { const q = (i * 11) % NS_, y = 1 - (q + 0.5) / NS_ * 2, r = Math.sqrt(1 - y * y), a = q * GA; return [Math.cos(a) * r, y, Math.sin(a) * r]; });
   // o contorno, o equador, o núcleo (onde as linhas são sugadas) e o halo da bola de luz
   sph.insertAdjacentHTML("afterbegin", `<b class="s-halo"></b><b class="s-rim"></b><b class="s-eq"></b><b class="s-core"></b>`);
   const sRim = $(".s-rim", sph), sEq = $(".s-eq", sph), sCore = $(".s-core", sph), sHalo = $(".s-halo", sph);
@@ -1149,7 +1151,39 @@
     // o centro da esfera no sistema de coordenadas das linhas
     const vb = gsvg.viewBox.baseVal, kx = vb && vb.width ? vb.width / sv.width : 1, ky = vb && vb.height ? vb.height / sv.height : 1;
     sC = [(o.left - sv.left) * kx, (o.top - sv.top) * ky];
+    // o canvas cobre a tela presa inteira (os fios saem da área do grafo ao girar) e desenha em pixels de tela
+    const pinEl = graph.closest(".tools-pin"), pin = (pinEl || graph).getBoundingClientRect();
+    fxK = Math.min(2, devicePixelRatio || 1); fxO = [sv.left - pin.left, sv.top - pin.top];
+    gfx.style.left = `${((pin.left - g.left) / sc).toFixed(1)}px`; gfx.style.top = `${((pin.top - g.top) / sc).toFixed(1)}px`;
+    gfx.style.width = `${(pin.width / sc).toFixed(1)}px`; gfx.style.height = `${(pin.height / sc).toFixed(1)}px`;
+    gfx.width = Math.round(pin.width * fxK); gfx.height = Math.round(pin.height * fxK);
+    // destinos: dentro de cada coluna, a ordem de cima para baixo vira a ordem em volta da esfera. O nome do
+    // topo dá a volta por cima, o de baixo por baixo, e ninguém cruza o caminho do vizinho (um abraço).
+    // Os trabalhos ficam com pontos bem separados; quem tem o caminho mais longo sai antes e todos chegam juntos
+    const isW = sBtns.map(b => !!b.dataset.w), nW = isW.filter(Boolean).length;
+    const wSlots = Array.from({ length: nW }, (_, j) => Math.round((j + 0.5) * NS_ / nW - 0.5));
+    const tSlots = sFib.map((_, q) => q).filter(q => !wSlots.includes(q));
+    [[true, wSlots, -1], [false, tSlots, 1]].forEach(([w, slots, sx]) => {
+      const ids = sBtns.map((_, i) => i).filter(i => isW[i] === w);
+      const ts = slots.map(q => { const p = sProj(sFib[q], 0); return { q, p, phi: Math.atan2(p[1], sx * p[0]), r: Math.hypot(p[0], p[1]) }; }).sort((a, b) => a.phi - b.phi);
+      const as = ids.map((i, r) => {
+        // o que viaja é o texto (a pílula some antes): o desvio leva o centro do texto, e não o da pílula, ao ponto
+        const tb = sEls[i].children[1], off = tb.offsetLeft + tb.offsetWidth / 2 - sEls[i].offsetWidth / 2;
+        const x0 = sFrom[i][0] + off, y0 = sFrom[i][1], T = ts[Math.min(r, ts.length - 1)];
+        return (sA[i] = { sx, q: T.q, p0: T.p, off, phi0: Math.atan2(y0, sx * x0), r0: Math.hypot(x0, y0), phi1: T.phi, r1: T.r, d: 0 });
+      });
+      const far = Math.max(0.001, ...as.map(a => Math.abs(a.phi1 - a.phi0)));
+      as.forEach(a => { a.d = (1 - Math.abs(a.phi1 - a.phi0) / far) * 0.14; });
+    });
   };
+  // ponto da esfera na tela: gira em volta do eixo vertical, inclina e ganha perspectiva
+  const sFib = sEls.map((_, q) => { const y = 1 - (q + 0.5) / NS_ * 2, r = Math.sqrt(1 - y * y), a = q * GA; return [Math.cos(a) * r, y, Math.sin(a) * r]; });
+  const sProj = (d, ang) => {
+    const ca = Math.cos(ang), sa = Math.sin(ang), ct = Math.cos(0.32), st = Math.sin(0.32);
+    const x = d[0] * ca + d[2] * sa, z = -d[0] * sa + d[2] * ca, y = d[1] * ct - z * st, z2 = d[1] * st + z * ct, k = 1100 / (1100 - z2 * sR);
+    return [x * sR * k, y * sR * k, z2, k];
+  };
+  const sA = [];
   const ease = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
   const soft = t => 0.5 - 0.5 * Math.cos(Math.PI * t);   // seno: a mais macia das curvas de entrada e saída
   const cl = v => Math.min(1, Math.max(0, v));
@@ -1162,12 +1196,12 @@
   // longo da linha, então pontos vizinhos andam sempre juntos e a linha nunca dobra em quina.
   // Uma ponta sai um pouco antes da outra, e a linha entra no núcleo como um fio sendo puxado.
   // O desenho final passa por uma spline (Catmull-Rom), então toda curva é contínua e sem ângulos.
-  const LP = 16;   // pontos por linha: a suavização Catmull-Rom mantém a curva redonda com 16
+  const LP = 28;   // pontos por linha
   let lineKey = "", gCoreEl = null;
   const unwrap = arr => { for (let i = 1; i < arr.length; i++) { while (arr[i] - arr[i - 1] > Math.PI) arr[i] -= TAU; while (arr[i] - arr[i - 1] < -Math.PI) arr[i] += TAU; } return arr; };
   const lineSetup = () => {
     const key = `${sC[0].toFixed(1)},${sC[1].toFixed(1)},${sR.toFixed(1)},${gLinks.length}`;
-    if (key === lineKey && gLinks[0] && gLinks[0].pr) return; lineKey = key;   // o grafo pode ter sido redesenhado
+    if (key === lineKey && gLinks[0] && gLinks[0].pr) return; lineKey = key; lineRmax = 0;   // o grafo pode ter sido redesenhado
     const [cx0, cy0] = sC, n = gLinks.length;
     gLinks.forEach((L, k) => {
       const [y1, y2, x2] = L.g;
@@ -1198,8 +1232,8 @@
       const rf = [], af = [];
       for (let i = 0; i < LP; i++) {
         const a = ph + arcDir * span * (i / (LP - 1)), ex = Math.cos(a) * rk, ey = Math.sin(a) * rk * squash;
-        const fx = ex * ct - ey * st, fy = ex * st + ey * ct;
-        rf.push(Math.hypot(fx, fy)); af.push(Math.atan2(fy, fx));
+        const gfx = ex * ct - ey * st, fy = ex * st + ey * ct;
+        rf.push(Math.hypot(gfx, fy)); af.push(Math.atan2(fy, gfx));
       }
       unwrap(af);
       // escolhe a volta do destino mais perto da linha original e soma meia volta no sentido dela: espiral
@@ -1233,63 +1267,67 @@
     // sem medida válida (grafo ainda sem tamanho, um quadro de redesenho), não desenha nada errado
     if (!isFinite(sC[0]) || !isFinite(sC[1]) || !sR) return;
     lineSetup();
-    const [cx0, cy0] = sC;
-    // a luz: o centro do gradiente acompanha o núcleo; conforme o globo se forma, a parte transparente
-    // fecha em volta dele e as pontas de fora das linhas se apagam sozinhas, sem cortes
-    const grad = gsvg.querySelector("#gCore"), R0 = Math.max(gsvg.viewBox.baseVal.width, 600), f = ss(0.2, 0.75, m);
-    if (grad) {
-      put(grad, "@cx", cx0.toFixed(1)); put(grad, "@cy", cy0.toFixed(1)); put(grad, "@r", R0.toFixed(0));
-      const st = grad.children, o = [sR * 0.07, sR * 0.16, lerp(0.6 * R0, sR * 0.8, f), lerp(R0, sR * 1.45, f)].map(v => cl(v / R0));
-      put(st[1], "@offset", o[0].toFixed(4)); put(st[2], "@offset", Math.max(o[0] + 0.001, o[1]).toFixed(4));
-      put(st[3], "@offset", Math.max(o[1] + 0.002, o[2]).toFixed(4)); put(st[4], "@offset", Math.max(o[2] + 0.003, o[3]).toFixed(4));
-    }
-    // cada linha se transforma direto no seu anel: os pontos da curva original e os do arco final são
-    // misturados (uma mistura de duas curvas suaves é sempre suave, então não há quina nem laço solto).
-    // O anel de destino chega girando um pouco para trás e se acomoda no lugar: o caminho de cada ponto
-    // vira uma curva, e o conjunto parece entrar em órbita. A entrada é por plano: primeiro os fios do
-    // primeiro anel, depois os do segundo, depois os do terceiro
+    const [cx0, cy0] = sC, ctx = gfx.getContext("2d");
+    const rMax = lineRmax || (lineRmax = Math.max(1, ...gLinks.flatMap(L => L.pr)));
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, gfx.width, gfx.height);
+    ctx.setTransform(fxK, 0, 0, fxK, fxO[0] * fxK, fxO[1] * fxK);
+    ctx.globalCompositeOperation = "screen"; ctx.lineCap = ctx.lineJoin = "round";
+    // a luz: creme no núcleo, laranja em volta e transparente longe dele. Conforme o globo se forma, a parte
+    // transparente fecha em volta do núcleo e o que ainda está longe se apaga sozinho, sem corte
+    const R0 = Math.max(gsvg.viewBox.baseVal.width, 600), f = ss(0.2, 0.75, m);
+    const o = [sR * 0.07, sR * 0.16, lerp(0.6 * R0, sR * 0.8, f), lerp(R0, sR * 1.45, f)].map(v => cl(v / R0));
+    const s1 = Math.min(0.997, Math.max(o[0] + 0.001, o[1])), s2 = Math.min(0.998, Math.max(s1 + 0.001, o[2])), s3 = Math.min(1, Math.max(s2 + 0.001, o[3]));
+    const grad = ctx.createRadialGradient(cx0, cy0, 0, cx0, cy0, R0);
+    grad.addColorStop(0, "#fff6ea"); grad.addColorStop(Math.min(0.996, o[0]), "#ffd2a2"); grad.addColorStop(s1, "#ff8a4a");
+    grad.addColorStop(s2, "rgba(255, 90, 31, .78)"); grad.addColorStop(s3, "rgba(255, 90, 31, 0)");
+    ctx.strokeStyle = grad;
+    // a luz puxa como um ralo: o que está mais perto dela começa a cair primeiro e gira mais; o que está longe
+    // é arrastado depois. A onda sai do centro para fora, então nenhuma ligação se move em bloco.
+    // Cada ponto desce em espiral (a origem gira e encolhe) enquanto a órbita de destino assume o lugar
     gLinks.forEach(L => {
-      const n3 = Math.ceil(gLinks.length / 3), pts = L.pts || (L.pts = Array.from({ length: LP }, () => [0, 0])), o = L.orb, kin = Math.floor(Math.round(L.k * gLinks.length) / 3) / n3;
-      // primeiro tempo (0 a 0,22): as ligações se apertam no centro, ainda presas nos botões; só então soltam
-      // a soltura começa antes de o aperto terminar: um movimento emenda no outro, sem parada no meio
-      const pinch = sstep(cl(m / 0.24)), start = 0.07 + o.plane * 0.11 + kin * 0.05;
+      const pts = L.pts || (L.pts = Array.from({ length: LP }, () => [0, 0])), q = L.orb;
+      const go = 0.03 + L.k * 0.1, rot = q.tilt + q.offR, cr = Math.cos(rot), sr = Math.sin(rot);
       let wSum = 0;
       for (let i = 0; i < LP; i++) {
-        const along = L.lead > 0 ? i / (LP - 1) : 1 - i / (LP - 1);
-        const w = sstep(cl((m - start - along * 0.04) / 0.4));
+        const rn = L.pr[i] / rMax, w = sstep(cl((m - go - rn * 0.3) / 0.46));
         wSum += w;
-        const rot = o.tilt + o.offR + 0.95 * (1 - w), cr = Math.cos(rot), sr = Math.sin(rot);
-        const pa = o.ph + o.arcDir * o.span * (i / (LP - 1)) + (L.ps || 0);
-        const ex = Math.cos(pa) * o.rk, ey = Math.sin(pa) * o.rk * o.squash;
-        const tx = cx0 + ex * cr - ey * sr, ty = cy0 + ex * sr + ey * cr;
-        const sx = L.ox[i] + (L.qx[i] - L.ox[i]) * pinch, sy = L.oy[i] + (L.qy[i] - L.oy[i]) * pinch;
-        pts[i][0] = sx + (tx - sx) * w; pts[i][1] = sy + (ty - sy) * w;
+        const pa = q.ph + q.arcDir * q.span * (i / (LP - 1)) + (L.ps || 0);
+        const ex = Math.cos(pa) * q.rk, ey = Math.sin(pa) * q.rk * q.squash;
+        const sw = (1.3 + 1.5 * (1 - rn)) * w, cs = Math.cos(sw), sn = Math.sin(sw), keep = Math.pow(1 - w, 1.7), ox = L.ox[i] - cx0, oy = L.oy[i] - cy0;
+        pts[i][0] = cx0 + (ox * cs - oy * sn) * keep + (ex * cr - ey * sr) * w;
+        pts[i][1] = cy0 + (ox * sn + oy * cs) * keep + (ex * sr + ey * cr) * w;
       }
       const em = wSum / LP;
-      if (pts.some(q => !isFinite(q[0]) || !isFinite(q[1]))) return;
-      L.p.setAttribute("d", smooth(pts));
-      // rastro: enquanto cai, a linha perde o pedaço de trás (fica só a cabeça que entra primeiro); já no
-      // núcleo, o trecho aceso corre pela órbita, como energia circulando
-      // o fluxo é uma fase própria de cada linha, que só anda depois que ela chegou (e na velocidade
-      // certa): antes ele usava o relógio da página, e a luz dava várias voltas de uma vez ao ligar
-      L.fl = (L.fl || 0) + dt * 0.07 * ss(0.7, 1, em);
-      // o anel também só começa a girar quando a linha já está chegando nele: assim o destino continua
-      // alinhado com a linha durante a entrada, por mais tempo que a página esteja aberta
+      // o anel só começa a girar quando o fio já está chegando nele; de volta ao grafo, zera
       L.ps = (L.ps || 0) + dt * L.spin * ss(0.55, 1, em);
-      if (em < 0.01) L.ps = L.fl = 0;   // voltou para o grafo: a próxima entrada começa alinhada de novo
-      // trecho visível [a, b] da linha (0 = ponta do trabalho, 1 = ponta da ferramenta). As ligações que
-      // estavam apagadas nascem do trabalho: b cresce de 0 até 1 enquanto elas já se apertam e seguem
-      // para a órbita. Perto do fim, o rastro deixa só a cabeça que entra primeiro
+      if (em < 0.01) L.ps = 0;
+      // as ligações que estavam apagadas nascem do trabalho enquanto já são puxadas
       const grow = L.on0 ? 1 : sstep(cl((m - L.k * 0.1) / 0.24));
-      const vis = 1 - 0.5 * em;
-      let a = L.lead > 0 ? 0 : 1 - vis, b = L.lead > 0 ? vis : 1;
-      b = Math.min(b, grow); if (b < a) b = a;
-      const len = Math.max(0.0001, b - a);
-      put(L.p, "strokeDasharray", `${len.toFixed(4)} ${(1.0002 - len).toFixed(4)}`);
-      put(L.p, "strokeDashoffset", (-a - (L.fl % 1)).toFixed(4));
-      put(L.p, "strokeWidth", (1.3 - 0.45 * em).toFixed(2));
-      put(L.p, "opacity", "1");
+      // em órbita o fio vira um cometa: perde a cauda e fica só o trecho da frente, que corre pelo anel
+      const vis = 1 - 0.6 * ss(0.6, 1, em), fwd = q.arcDir > 0;
+      const lo = fwd ? 1 - vis : 0, hi = Math.min(fwd ? 1 : vis, grow);
+      if (hi <= lo + 0.003 || !isFinite(pts[0][0]) || !isFinite(pts[LP - 1][1])) return;
+      const hot = ss(0.3, 0.85, em);
+      // três passadas somadas: um halo largo e fraco, o traço, e a cabeça mais clara quando já orbita
+      fxTrace(ctx, pts, lo, hi);
+      ctx.globalAlpha = 0.07 + 0.06 * hot; ctx.lineWidth = 7; ctx.stroke();
+      ctx.globalAlpha = lerp(L.on0 ? 0.95 : 0.7, 0.5, hot); ctx.lineWidth = lerp(L.on0 ? 1.6 : 1.15, 1, hot); ctx.stroke();
+      if (hot > 0.02) {
+        fxTrace(ctx, pts, fwd ? lerp(lo, hi, 0.55) : lo, fwd ? hi : lerp(lo, hi, 0.45));
+        ctx.globalAlpha = 0.6 * hot; ctx.lineWidth = 1.7; ctx.stroke();
+      }
     });
+    ctx.globalAlpha = 1;
+  };
+  // um trecho [lo, hi] do fio como curva contínua (os pontos viram controles; a curva passa pelos meios)
+  const fxAt = (pts, u) => { const x = u * (LP - 1), i = Math.min(LP - 2, Math.floor(x)), t = x - i; return [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t]; };
+  const fxTrace = (ctx, pts, lo, hi) => {
+    const q = [fxAt(pts, lo)];
+    for (let i = Math.ceil(lo * (LP - 1) + 1e-6); i <= Math.floor(hi * (LP - 1) - 1e-6); i++) q.push(pts[i]);
+    q.push(fxAt(pts, hi));
+    ctx.beginPath(); ctx.moveTo(q[0][0], q[0][1]);
+    for (let j = 1; j < q.length - 1; j++) ctx.quadraticCurveTo(q[j][0], q[j][1], (q[j][0] + q[j + 1][0]) / 2, (q[j][1] + q[j + 1][1]) / 2);
+    ctx.lineTo(q[q.length - 1][0], q[q.length - 1][1]);
   };
   const sDraw = now => {
     const dt = sLast ? Math.min(0.05, (now - sLast) / 1000) : 0; sLast = now;
@@ -1312,34 +1350,24 @@
     pullLines(sM, now / 1000, dt);
     // giro: devagar na esfera; na bola de luz cada rolada acelera, até virar um borrão
     // giro: devagar na esfera; rolando mais, a órbita dos nomes acelera (a esfera não cresce nem some)
-    sAng += dt * (0.32 * ss(0.25, 0.6, sM) + 3.4 * Math.pow(sL, 1.4));
-    const ca = Math.cos(sAng), sa = Math.sin(sAng), tx = 0.32;
-    const shrink = 1, fade = 1;
+    sAng += dt * (0.32 * ss(0.5, 0.85, sM) + 3.4 * Math.pow(sL, 1.4));
+    const fade = 1;
     // três tempos: os nomes entram numa órbita (o equador da esfera, já girando); a órbita se abre e vira
     // a esfera; e, rolando mais, a esfera gira cada vez mais rápido e se fecha numa bola de luz
+    // primeiro a pílula some no lugar (borda e número); depois o texto viaja em arco em volta do centro (raio
+    // e ângulo juntos, nunca uma reta pelo meio) até o ponto dele na esfera, que só então começa a girar
+    const chrome = 1 - sstep(cl((sM - 0.03) / 0.14));
     for (let i = 0; i < NS_; i++) {
-      // cada nome sai num tempo um pouco diferente (ordem embaralhada, não de cima para baixo) e a viagem é
-      // longa, com uma curva de seno: começa e termina devagar, sem o pico de velocidade no meio
-      const d = (((i * 7) % NS_) / NS_) * 0.16;
-      const e1 = soft(cl((sM - 0.12 - d) / 0.5));
-      const e2 = soft(cl((sM - 0.6 - d * 0.5) / 0.32));
-      // na órbita a ordem também salta de 11 em 11, para os trabalhos (laranja) ficarem espalhados no anel
-      const th = ((i * 11) % NS_) / NS_ * Math.PI * 2, [sx0, sy0, sz0] = sDir[i];
-      const dx = Math.cos(th) + (sx0 - Math.cos(th)) * e2, dy = sy0 * e2, dz = Math.sin(th) + (sz0 - Math.sin(th)) * e2;
-      // a órbita é vista quase de cima (um anel aberto, os nomes não se amontoam) e maior; ao virar esfera,
-      // ela se inclina até o ângulo final e encolhe para o raio da esfera
-      const tl = 1.05 + (tx - 1.05) * e2, ctl = Math.cos(tl), stl = Math.sin(tl);
-      const rr = sR * (1 + (wide() ? 0.18 : 0.04) * (1 - e2)) * shrink;
-      let x = dx * ca + dz * sa, z = -dx * sa + dz * ca, y = dy;
-      const y2 = y * ctl - z * stl, z2 = y * stl + z * ctl;
-      const pz = z2 * rr * e1, k = 1100 / (1100 - pz);
-      const px = (sFrom[i][0] + (x * rr - sFrom[i][0]) * e1) * k, py = (sFrom[i][1] + (y2 * rr - sFrom[i][1]) * e1) * k;
-      const sc2 = 1 + (k - 1) * e1;
+      const A = sA[i]; if (!A) continue;
+      const e = soft(cl((sM - 0.14 - A.d) / 0.56));
+      const phi = lerp(A.phi0, A.phi1, e), r = lerp(A.r0, A.r1, e), p = sProj(sFib[A.q], sAng);
+      const px = A.sx * Math.cos(phi) * r + (p[0] - A.p0[0]) * e - A.off, py = Math.sin(phi) * r + (p[1] - A.p0[1]) * e;
+      const sc2 = 1 + (p[3] - 1) * e;
       sEls[i].style.transform = `translate3d(${px.toFixed(1)}px, ${py.toFixed(1)}px, 0) translate(-50%, -50%) scale(${sc2.toFixed(3)})`;
       const dim0 = sDim[i] == null ? 1 : sDim[i];
-      sEls[i].style.opacity = ((1 - e1 * (0.62 - 0.62 * (z2 + 1) / 2)) * fade * (dim0 + (1 - dim0) * ss(0, 0.5, e1))).toFixed(3);
-      sPill[i].style.opacity = sNum[i].style.opacity = (1 - e1).toFixed(3);
-      sEls[i].classList.toggle("lit", e1 > 0.5);
+      sEls[i].style.opacity = ((1 - e * (0.62 - 0.62 * (p[2] + 1) / 2)) * fade * (dim0 + (1 - dim0) * ss(0, 0.5, Math.max(e, 1 - chrome)))).toFixed(3);
+      sPill[i].style.opacity = sNum[i].style.opacity = chrome.toFixed(3);
+      sEls[i].classList.toggle("lit", chrome < 0.5);
     }
     const o = ss(0.45, 0.9, sM);
     sRim.style.opacity = o.toFixed(3); sEq.style.opacity = o.toFixed(3);
@@ -1371,25 +1399,27 @@
     if (m > 0 && !sRaf) { sLast = 0; sRaf = requestAnimationFrame(sLoop); }
   };
   let toolsAt = -2, toolsST = null;
+  // o roteiro da seção presa, em telas de rolagem: entrada · passeio (0,36 tela por trabalho, para uma rolada
+  // normal andar um ou dois e não a lista inteira) · ligações e globo · a órbita acelera · contato por cima
+  const T_IN = 0.21, T_WORK = 0.36, T_TOUR = T_WORK * D.works.length, T_GLOBE = 2.66, T_FAST = 1.4;
+  const T_ALL = T_IN + T_TOUR + T_GLOBE + 0.14 + T_FAST + 0.12 + 1;
   // escolher um trabalho com o mouse leva a rolagem para o ponto dele: rolar depois continua dali
   function syncWork(attr, val) {
     if (attr !== "w" || !toolsST || !toolsST.isActive) return;
     const k = D.works.findIndex(w => w.id === val), n = D.works.length;
     if (k < 0 || k === toolsAt) return;
-    toolsAt = k; jumpTo(toolsST.start + (toolsST.end - toolsST.start) * (0.03 + (k + 0.5) / n * 0.21));
+    toolsAt = k; jumpTo(toolsST.start + (toolsST.end - toolsST.start) * (T_IN + (k + 0.5) / n * T_TOUR) / T_ALL);
   }
   const toolsTo = p => {
     // primeiro a rolagem passa por cada trabalho, de cima para baixo; depois os nomes viram a esfera
-    // seção presa por 7 telas: 0,03–0,24 passeio pelos trabalhos · 0,24–0,62 ligações e globo (a parte mais
-    // longa) · 0,64–0,84 a órbita acelera · 0,857–1 contato por cima. O último trabalho fica destacado até
-    // o globo começar
-    const t = (p - 0.03) / 0.21, n = D.works.length;
+    // as fases estão em telas (T_IN, T_TOUR, T_GLOBE, T_FAST); o último trabalho fica destacado até o globo começar
+    const v = p * T_ALL, t = (v - T_IN) / T_TOUR, n = D.works.length;
     const k = t < 0 || !graph.classList.contains("ready") ? -1 : Math.min(n - 1, Math.floor(t * n));
     // durante o globo o destaque não é aplicado (as linhas estão sendo desenhadas por ele); fica guardado
     // e entra quando o grafo se refaz, na volta
     if (k !== toolsAt) { toolsAt = k; if (!sRaf && sM <= 0) focusGraph("w", k < 0 ? null : D.works[k].id); }
     sHide = p > 0.995;
-    sphereTo(Math.min(1, Math.max(0, (p - 0.24) / 0.38)), Math.min(1, Math.max(0, (p - 0.64) / 0.2)));
+    sphereTo(cl((v - T_IN - T_TOUR) / T_GLOBE), cl((v - T_IN - T_TOUR - T_GLOBE - 0.14) / T_FAST));
   };
 
   /* ---------- 08 · contato ---------- */
@@ -1429,15 +1459,15 @@
   ScrollTrigger.create({ trigger: ".hero", start: "top top", end: "bottom bottom", onUpdate: s => { heroP = s.progress; camera(heroP); } });
   gsap.to(".hero-copy", { yPercent: -18, opacity: 0, ease: "none", scrollTrigger: { trigger: ".hero", start: "top top", end: "28% top", scrub: true } });
   // as três linhas da manchete saem em velocidades diferentes, abrindo como um leque
-  [-5, 3, 9].forEach((x, i) => gsap.to(`.hero-head .ln:nth-child(${i + 1})`, { xPercent: x, ease: "none", scrollTrigger: { trigger: ".hero", start: "top top", end: "28% top", scrub: true } }));
+  [-5, 3, 9].forEach((x, i) => gsap.to(`.hero-name .ln:nth-child(${i + 1})`, { xPercent: x, ease: "none", scrollTrigger: { trigger: ".hero", start: "top top", end: "28% top", scrub: true } }));
 
   // 02 + 03: a viagem inteira é um número só
   tripST = ScrollTrigger.create({ trigger: tripRun, start: "top top", end: "bottom bottom", onUpdate: s => tripTo(s.progress) });
   // 08: o grafo fica grudado; a rolagem passeia pelos trabalhos e termina na esfera
   graphFit(); addEventListener("resize", () => { graphFit(); sFrom = null; if (sM > 0) sMeasure(); });
   document.fonts && document.fonts.ready.then(graphFit);
-  // preso de verdade (fixed) por 7 telas: a última delas é o contato subindo por cima do globo
-  toolsST = ScrollTrigger.create({ trigger: ".tools-pin", start: "top top", end: "+=700%", pin: true, pinSpacing: true, anticipatePin: 1, onUpdate: s => toolsTo(s.progress) });
+  // preso de verdade (fixed) por T_ALL telas: a última delas é o contato subindo por cima do globo
+  toolsST = ScrollTrigger.create({ trigger: ".tools-pin", start: "top top", end: () => `+=${Math.round(T_ALL * 100)}%`, pin: true, pinSpacing: true, anticipatePin: 1, onUpdate: s => toolsTo(s.progress) });
 
   const mm = gsap.matchMedia();
   mm.add({ wide: "(min-width: 861px)", narrow: "(max-width: 860px)" }, ctx => {
