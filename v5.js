@@ -162,7 +162,7 @@
   };
   sizeMap(); camera(0);
   addEventListener("resize", () => { sizeMap(); camera(heroP); });
-  let heroP = 0;
+  let heroP = 0, heroArm = false;   // heroArm: a rolagem já levou a abertura embora; ao voltar ao topo o feed é relido
 
   /* ---------- 00 · do feed ao mapa: a abertura num canvas só ---------- */
   // Uma camada 2D do tamanho da tela (nunca do tamanho do mapa) desenha a entrada e o que fica vivo depois:
@@ -223,8 +223,10 @@
   // entrada: tempos em segundos a partir do html.go. As linhas de baixo são lidas primeiro, para o título
   // subir num espaço que já esvaziou
   const T_READ = 0.42, T_STEP = 0.0095, T_FLY = 0.72;
-  const intro = { on: false, t: 0, lines: [], end: 0, font: "", max: 0 };
-  const startIntro = () => {
+  const intro = { on: false, veil: true, t: 0, lines: [], end: 0, font: "", max: 0 };
+  // veil = false é a releitura (ao voltar ao topo pela rolagem): o mesmo gesto por cima do mapa já aceso, sem o véu
+  const startIntro = (veil = true) => {
+    intro.veil = veil;
     const mob = !wide(), fs = mob ? 9 : 12, n = list.length, sr = stage.getBoundingClientRect();
     const x0 = Math.max(16, $("#heroLive").getBoundingClientRect().left - sr.left);
     // o feed ocupa a faixa acima do texto, em colunas; se a faixa for baixa demais (tela curta, celular) ele
@@ -243,10 +245,11 @@
     intro.end = T_READ + (n - 1) * T_STEP + T_FLY + 0.35;
     intro.t = 0; intro.start = performance.now(); intro.on = true;
     // desfecho garantido: se os quadros não vierem (aba ocluída, abertura fora da tela), o véu sai mesmo assim
-    setTimeout(endIntro, (intro.end + 0.7) * 1000 + 500);
+    const run = (intro.run = (intro.run || 0) + 1);
+    setTimeout(() => endIntro(run), (intro.end + 0.7) * 1000 + 500);
   };
-  const endIntro = () => {
-    if (!intro.on) return;
+  const endIntro = run => {
+    if (!intro.on || (run && run !== intro.run)) return;
     intro.on = false;
     root.classList.remove("fx");
     list.forEach(s => nodes.get(s.n).classList.add("lit"));
@@ -259,6 +262,7 @@
     const I = intro; I.t = (performance.now() - I.start) / 1000;
     const t = I.t;
     // véu: tudo escuro; cada estação que recebeu o seu dado abre um clarão nas ruas em volta
+    if (I.veil) {
     fx.globalAlpha = t < I.end ? 1 : Math.max(0, 1 - (t - I.end) / 0.7);
     fx.fillStyle = "#0e0d0b"; fx.fillRect(0, 0, fxW, fxH);
     fx.globalAlpha = 1;
@@ -271,6 +275,7 @@
       fx.fillStyle = g; fx.beginPath(); fx.arc(x, y, r, 0, TAU); fx.fill();
     });
     fx.globalCompositeOperation = "source-over";
+    }
     // o feed: cada linha é digitada, fica laranja quando é lida e some quando o ponto parte
     fx.font = I.font; fx.textBaseline = "middle";
     I.lines.forEach(L => {
@@ -375,13 +380,48 @@
     });
   };
 
+  // clique perto de uma estação: a linha dela aparece lá em cima, no lugar do feed (longe do cursor, do HUD e
+  // do cartão da estação), é lida e o ponto voa até ela. É a entrada inteira, uma estação por vez
+  const singles = [];
+  const drawSingles = dt => {
+    if (!singles.length) return;
+    fx.font = `500 12px "Geist Mono", ui-monospace, monospace`; fx.textBaseline = "middle";
+    for (let i = singles.length - 1; i >= 0; i--) {
+      const q = singles[i]; q.t += dt;
+      const out = q.t - 0.55;
+      if (out > 0.3) { singles.splice(i, 1); continue; }
+      const shown = q.text.slice(0, Math.ceil(q.text.length * Math.min(1, q.t / 0.22))), w = fx.measureText(shown).width;
+      const x = q.x, y = 92 + q.slot * 22, al = out > 0 ? 1 - out / 0.3 : 1;
+      fx.fillStyle = `rgba(14,13,11,${(0.82 * al).toFixed(3)})`; fx.fillRect(x - 7, y - 11, w + 14, 22);
+      fx.fillStyle = q.t > 0.36 ? `rgba(255,90,31,${al.toFixed(3)})` : "rgba(239,234,225,.85)";
+      fx.fillText(shown, x, y);
+      if (out >= 0 && !q.sent) { q.sent = true; packs.push({ from: [x, y], b: q.s, t: 0, dur: T_FLY, bend: (Math.random() - 0.5) * 0.5 }); }
+    }
+  };
+  if (fx) {
+    stage.addEventListener("click", e => {
+      if (intro.on && intro.veil) return;
+      if (e.target.closest && e.target.closest("a, button, p, [role=button]")) return;
+      const r = stage.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+      let best = null, bd = 90;
+      list.forEach(s => { const [sx, sy] = scr(s), d = Math.hypot(sx - x, sy - y); if (d < bd) { bd = d; best = s; } });
+      if (!best || singles.length > 5) return;
+      let slot = 0; while (singles.some(q => q.slot === slot)) slot++;
+      singles.push({ s: best, slot, x: Math.max(16, $("#heroLive").getBoundingClientRect().left - r.left), t: 0, sent: false, text: `{"estacao": ${best.n}, "nome": "${best.name}", "vagas": ${best.cap}}` });
+    });
+  }
+
   // um laço só, que para quando a abertura sai da tela ou a aba fica em segundo plano
   let fxOn = false, fxRaf = 0, fxLast = 0, heroSeen = false;
   const frame = now => {
     fxRaf = requestAnimationFrame(frame);
     const dt = Math.min(0.05, Math.max(0, (now - fxLast) / 1000)); fxLast = now;
     fx.clearRect(0, 0, fxW, fxH);
-    if (intro.on) drawIntro(); else emit(dt);
+    // de volta ao topo depois de ter rolado para longe: o feed é lido de novo, sozinho
+    if (heroArm && heroP < 0.03 && !intro.on) { heroArm = false; startIntro(false); }
+    if (intro.on) drawIntro();
+    if (!intro.on || !intro.veil) emit(dt);
+    drawSingles(dt);
     drawPacks(dt);
     if (fine) pointerStep(dt, now);
   };
@@ -937,12 +977,9 @@
         <div class="chat"><div class="feed" id="tgFeed">${edital(EDITAIS[0])}</div></div></div>
       <span class="fchip c1">estado · RJ</span><span class="fchip c2">nível · superior</span><span class="fchip c3">palavra · dados</span></div>`,
     // mapa de ladrilhos do Brasil (coluna, linha): altura e cor são só ilustração, sem dado real
-    saude: `<span class="demo-note">ilustração · sem dados reais</span><div class="d3 d3-uf"><div class="uf-plane">${UFS.map(([u, c, r], i) => {
-      const a = 0.22 + ((u.charCodeAt(0) * 7 + u.charCodeAt(1) * 3) % 55) / 100;
-      return `<span class="t" style="grid-column:${c + 1};grid-row:${r};--a:${a.toFixed(2)};--h:${(0.35 + (a - 0.22) * 4.2).toFixed(2)}em;--d:${(0.15 + r * 0.085 + c * 0.03).toFixed(3)}s"><i class="tt">${u}</i><i class="ts"></i><i class="te"></i></span>`;
-    }).join("")}</div></div>`,
+    saude: `<span class="demo-note">ilustração · sem dados reais</span><div class="d3 d3-uf"><canvas class="iso" id="ufFx" aria-hidden="true"></canvas></div>`,
     mocforge: `<span class="demo-note">ilustração</span><div class="mcp"><p class="prompt">monte uma casinha de tijolos vermelhos</p><p class="call">add_parts_batch_tool · ${bricks.length} peças</p><p class="call">render_view_tool · conferindo</p></div>
-      <div class="d3 d3-bk"><div class="bk-plane">${bricks.map((b, i) => `<span class="bk${b.roof ? " roof" : ""}" style="--x:${b.x}em;--y:${b.y}em;--z:${(b.r * 1.2).toFixed(1)}em;--w:${b.w}em;--dd:${b.d}em;--d:${(0.5 + i * 0.05).toFixed(2)}s"><i class="bt"></i><i class="bs"></i><i class="bw"></i></span>`).join("")}</div></div>`,
+      <div class="d3 d3-bk"><canvas class="iso" id="bkFx" aria-hidden="true"></canvas></div>`,
   };
   $("#pjList").innerHTML = D.projects.map((p, i) => `<article class="pj" data-id="${p.id}" aria-label="${p.title}">
     <div class="wrap pj-grid">
@@ -953,25 +990,70 @@
       <div class="pj-demo">${demos[p.id]}</div>
     </div></article>`).join("");
   const pjs = $$(".pj");
+  // As duas maquetes (mapa do Brasil e casinha) são desenhadas num canvas 2D em projeção isométrica. Antes
+  // eram centenas de planos em CSS 3D, um por face: pesava em máquina fraca e as peças não tinham as faces
+  // de trás. Aqui cada bloco é um sólido com as três faces visíveis, e o canvas só redesenha enquanto algo anda
+  const iso = (rz, rx) => { const t = rz * Math.PI / 180, q = rx * Math.PI / 180; return { ex: [Math.cos(t), Math.sin(t) * Math.cos(q)], ey: [-Math.sin(t), Math.cos(t) * Math.cos(q)], zy: -Math.sin(q) }; };
+  const isoQuad = (c, B, pts, fill, edge) => {
+    c.beginPath();
+    pts.forEach((q, i) => { const X = q[0] * B.ex[0] + q[1] * B.ey[0], Y = q[0] * B.ex[1] + q[1] * B.ey[1] + q[2] * B.zy; i ? c.lineTo(X, Y) : c.moveTo(X, Y); });
+    c.closePath(); c.fillStyle = fill; c.fill();
+    // o contorno na cor da face fecha a fresta entre faces vizinhas; por cima, uma aresta escura bem fina
+    c.strokeStyle = fill; c.stroke();
+    if (edge) { c.strokeStyle = edge; c.stroke(); }
+  };
+  // caixa vista de cima: face esquerda (-x), face da frente (+y) e topo
+  const isoBox = (c, B, x, y, z, w, d, hh, cols, edge) => {
+    isoQuad(c, B, [[x, y, z], [x, y + d, z], [x, y + d, z + hh], [x, y, z + hh]], cols[2], edge);
+    isoQuad(c, B, [[x, y + d, z], [x + w, y + d, z], [x + w, y + d, z + hh], [x, y + d, z + hh]], cols[1], edge);
+    isoQuad(c, B, [[x, y, z + hh], [x + w, y, z + hh], [x + w, y + d, z + hh], [x, y + d, z + hh]], cols[0], edge);
+  };
+  // o canvas mede em "em" do bloco que o contém, com a origem no centro do plano: acompanha o tamanho da fonte
+  const isoStage = (cv, wEm, hEm, oxEm, oyEm) => {
+    const c = cv.getContext("2d"), host = cv.parentElement;
+    let em = 16;
+    const fit = () => {
+      em = parseFloat(getComputedStyle(host).fontSize) || 16;
+      const k = Math.min(devicePixelRatio || 1, 2);
+      cv.style.width = `${wEm}em`; cv.style.height = `${hEm}em`; cv.style.left = `calc(50% - ${oxEm}em)`; cv.style.top = `calc(50% - ${oyEm}em)`;
+      cv.width = Math.round(wEm * em * k); cv.height = Math.round(hEm * em * k);
+      c.setTransform(k * em, 0, 0, k * em, oxEm * em * k, oyEm * em * k);
+      c.lineJoin = "round"; c.lineWidth = 1 / em;
+    };
+    const clear = () => c.clearRect(-oxEm, -oyEm, wEm, hEm);
+    return { c, fit, clear, px: () => 1 / em };
+  };
+  const mixc = (a, b, t) => `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(",")})`;
+  const cl0 = v => Math.min(1, Math.max(0, v));
+  const pjStart = new Map();
+
   // mapa do Brasil: cada estado é um bloco que nasce rente ao chão e sobe até a altura dele conforme o
   // projeto entra na tela, numa onda de norte a sul. A rolagem dá o alvo e os blocos chegam nele devagar
   // (amortecido), então descer rápido ou devagar dá sempre uma subida macia; voltar desce de novo
   {
-    const plane = $(".uf-plane"), pj = plane && plane.closest(".pj");
-    if (plane) {
-      const tiles = $$(".t", plane).map(t => ({ t, top: t.querySelector(".tt"), s: t.querySelector(".ts"), e: t.querySelector(".te"), h: parseFloat(t.style.getPropertyValue("--h")), d: parseFloat(t.style.getPropertyValue("--d")) }));
-      const dMax = Math.max(...tiles.map(x => x.d));
-      const cl0 = v => Math.min(1, Math.max(0, v)), ez = t => 1 - Math.pow(1 - t, 3);
+    const cv = $("#ufFx"), pj = cv && cv.closest(".pj");
+    if (cv && cv.getContext) {
+      const B = iso(-24, 54), S = isoStage(cv, 46, 32, 23, 17), c = S.c, OR = [255, 90, 31], INKC = [14, 13, 11], BLK = [0, 0, 0];
+      const tiles = UFS.map(([u, col, row]) => {
+        const a = 0.22 + ((u.charCodeAt(0) * 7 + u.charCodeAt(1) * 3) % 55) / 100, x = col * 4.7 - 16.2, y = (row - 1) * 4.7 - 18.55;
+        return { u, x, y, h: 0.35 + (a - 0.22) * 4.2, d: 0.15 + row * 0.085 + col * 0.03, cols: [mixc(INKC, OR, a), mixc(BLK, OR, a * 0.6), mixc(BLK, OR, a * 0.45)] };
+      }).sort((p, q) => (p.y * 0.74 - p.x * 0.33) - (q.y * 0.74 - q.x * 0.33));   // do fundo para a frente
+      const dMax = Math.max(...tiles.map(x => x.d)), ez = t => 1 - Math.pow(1 - t, 3);
       let cur = reduce ? 1 : 0, goal = cur, raf = 0, lastT = 0;
-      const paint = () => tiles.forEach(x => {
-        const k = ez(cl0(cur * 1.55 - (x.d / dMax) * 0.55));
-        const h = Math.max(0.02, x.h * k);
-        x.top.style.transform = `translateZ(${h.toFixed(3)}em)`;
-        x.s.style.transform = `rotateX(90deg) scaleY(${(h / x.h).toFixed(3)})`;
-        x.e.style.transform = `rotateY(90deg) scaleX(${(h / x.h).toFixed(3)})`;
-        // o contorno do Brasil já aparece apagado, rente ao chão; cada bloco acende enquanto sobe
-        x.t.style.opacity = (0.28 + 0.72 * cl0(k * 3)).toFixed(3);
-      });
+      const paint = () => {
+        S.clear();
+        tiles.forEach(x => {
+          const k = ez(cl0(cur * 1.55 - (x.d / dMax) * 0.55)), hh = Math.max(0.02, x.h * k);
+          // o contorno do Brasil já aparece apagado, rente ao chão; cada bloco acende enquanto sobe
+          c.globalAlpha = 0.28 + 0.72 * cl0(k * 3);
+          isoBox(c, B, x.x, x.y, 0, 4.2, 4.2, hh, x.cols);
+          // a sigla deitada no topo do bloco: o texto é desenhado no plano do chão, na altura do bloco
+          c.save(); c.transform(B.ex[0], B.ex[1], B.ey[0], B.ey[1], 0, hh * B.zy); c.translate(x.x + 2.1, x.y + 2.1); c.scale(0.1, 0.1);
+          c.font = `600 10px "Geist Mono", ui-monospace, monospace`; c.textAlign = "center"; c.textBaseline = "middle"; c.fillStyle = "#efeae1"; c.fillText(x.u, 0, 0.5);
+          c.restore();
+        });
+        c.globalAlpha = 1;
+      };
       const tick = now => {
         const dt = lastT ? Math.min(0.05, (now - lastT) / 1000) : 0.016; lastT = now;
         cur += (goal - cur) * (1 - Math.exp(-dt * 2.6));
@@ -980,20 +1062,71 @@
         raf = cur === goal ? 0 : requestAnimationFrame(tick);
       };
       const want = () => {
-        const r = plane.getBoundingClientRect(), vh = innerHeight;
+        const r = cv.getBoundingClientRect(), vh = innerHeight;
         // 0 quando o mapa aponta embaixo da tela; 1 quando o centro dele passa de 60% da altura
-        goal = reduce ? 1 : cl0((vh - (r.top + r.height * 0.5)) / (vh * 0.55));
+        const g = reduce ? 1 : cl0((vh - (r.top + r.height * 0.5)) / (vh * 0.55));
+        if (g === goal) return;
+        goal = g;
         if (!raf) { lastT = 0; raf = requestAnimationFrame(tick); }
       };
-      plane.classList.add("js");
-      paint();
+      S.fit(); paint();
       let on = false;
       new IntersectionObserver(([e]) => { on = e.isIntersecting; if (on) want(); }, { rootMargin: "20% 0px" }).observe(pj);
       addEventListener("scroll", () => { if (on) want(); }, { passive: true });
+      addEventListener("resize", () => { S.fit(); paint(); });
+      document.fonts && document.fonts.ready.then(paint);
+    }
+  }
+  // a casinha: cada peça é um tijolo sólido com pinos de verdade (um cilindro baixo, com sombra na tampa).
+  // As peças caem uma a uma quando o projeto entra na tela; depois o desenho fica parado
+  {
+    const cv = $("#bkFx"), pj = cv && cv.closest(".pj");
+    if (cv && cv.getContext) {
+      const B = iso(-34, 62), S = isoStage(cv, 21, 22, 10.5, 17), c = S.c, HB = 1.2, DROP = 5;
+      const RED = { cols: ["#ff5a1f", "#d8461a", "#b23a14"], stud: "#ff7d4a", ring: "#e04c18" };
+      const DARK = { cols: ["#2a2722", "#1f1d19", "#141311"], stud: "#3d3932", ring: "#1a1815" };
+      // ordem de desenho: camada por camada, e dentro da camada do fundo para a frente
+      const parts = bricks.map((b, i) => ({ ...b, x: b.x - 6, y: b.y - 4, z: b.r * HB, t0: 0.5 + i * 0.05, pal: b.roof ? DARK : RED }))
+        .sort((p, q) => p.r - q.r || ((p.y + p.d) * 0.73 - p.x * 0.49) - ((q.y + q.d) * 0.73 - q.x * 0.49));
+      const T_END = 0.5 + (bricks.length - 1) * 0.05 + 0.7;
+      // círculos no plano do chão, na altura z (viram elipses na tela)
+      const discs = (cells, z, r, fill, dx = 0, dy = 0) => {
+        c.save(); c.transform(B.ex[0], B.ex[1], B.ey[0], B.ey[1], 0, z * B.zy);
+        c.beginPath(); cells.forEach(([x, y]) => { c.moveTo(x + dx + r, y + dy); c.arc(x + dx, y + dy, r, 0, Math.PI * 2); });
+        c.fillStyle = fill; c.fill(); c.restore();
+      };
+      const cellsOf = (x, y, w, d) => { const o = []; for (let i = 0; i < w; i++) for (let j = 0; j < d; j++) o.push([x + i + 0.5, y + j + 0.5]); return o; };
+      const baseCells = cellsOf(-8, -6, 16, 12);
+      const paint = t => {
+        S.clear();
+        // a base: uma placa clara com espessura e a marca dos pinos
+        isoBox(c, B, -8, -6, -0.35, 16, 12, 0.35, ["#d9d1c3", "#c2b9a9", "#b0a797"], "rgba(14,13,11,.1)");
+        discs(baseCells, 0, 0.2, "rgba(14,13,11,.12)");
+        parts.forEach(p => {
+          if (t < p.t0) return;
+          const u = cl0((t - p.t0) / 0.7), k = 1 - Math.pow(1 - u, 4), z = p.z + (1 - k) * DROP;
+          c.globalAlpha = cl0((t - p.t0) / 0.25);
+          isoBox(c, B, p.x, p.y, z, p.w, p.d, HB, p.pal.cols, "rgba(0,0,0,.16)");
+          const cells = cellsOf(p.x, p.y, p.w, p.d), top = z + HB;
+          discs(cells, top, 0.34, "rgba(0,0,0,.24)", 0.07, 0.09);            // sombra do pino na tampa
+          for (let s = 0; s <= 3; s++) discs(cells, top + s * 0.06, 0.3, p.pal.ring);   // o corpo do pino
+          discs(cells, top + 0.2, 0.3, p.pal.ring); discs(cells, top + 0.2, 0.25, p.pal.stud);   // a tampa do pino
+        });
+        c.globalAlpha = 1;
+      };
+      let t0 = 0, raf = 0, done = reduce;
+      const tick = now => {
+        const t = (now - t0) / 1000;
+        paint(t);
+        if (t < T_END) raf = requestAnimationFrame(tick); else { raf = 0; done = true; }
+      };
+      S.fit(); paint(done ? T_END : 0);
+      pjStart.set(pj, () => { if (done || raf) return; t0 = performance.now(); raf = requestAnimationFrame(tick); });
+      addEventListener("resize", () => { S.fit(); if (!raf) paint(done ? T_END : 0); });
     }
   }
   // cada projeto monta a demonstração uma vez; fora da tela, o que flutua pausa
-  const pjOnce = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { pjOnce.unobserve(e.target); e.target.classList.add("on"); } }), { threshold: 0.3 });
+  const pjOnce = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { pjOnce.unobserve(e.target); e.target.classList.add("on"); const go = pjStart.get(e.target); if (go) go(); } }), { threshold: 0.3 });
   const pjLive = new IntersectionObserver(es => es.forEach(e => e.target.classList.toggle("live", e.isIntersecting)));
   pjs.forEach(p => { pjOnce.observe(p); pjLive.observe(p); });
 
@@ -1456,7 +1589,7 @@
   }
 
   // 00: a câmera desce até o Centro enquanto a abertura fica grudada; o texto sai antes
-  ScrollTrigger.create({ trigger: ".hero", start: "top top", end: "bottom bottom", onUpdate: s => { heroP = s.progress; camera(heroP); } });
+  ScrollTrigger.create({ trigger: ".hero", start: "top top", end: "bottom bottom", onUpdate: s => { heroP = s.progress; if (heroP > 0.5) heroArm = true; camera(heroP); } });
   gsap.to(".hero-copy", { yPercent: -18, opacity: 0, ease: "none", scrollTrigger: { trigger: ".hero", start: "top top", end: "28% top", scrub: true } });
   // as três linhas da manchete saem em velocidades diferentes, abrindo como um leque
   [-5, 3, 9].forEach((x, i) => gsap.to(`.hero-name .ln:nth-child(${i + 1})`, { xPercent: x, ease: "none", scrollTrigger: { trigger: ".hero", start: "top top", end: "28% top", scrub: true } }));
