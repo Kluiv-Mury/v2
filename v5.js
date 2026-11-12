@@ -504,7 +504,7 @@
       hud: `<div class="now"><b id="tripBikes">…</b><span id="tripAt">bikes paradas · lendo a camada pública</span></div>` },
     { t: "Camadas", k: "6 fontes oficiais", h: `Seis camadas no Gêmeo. <em>Duas são minhas.</em>`,
       p: `O Gêmeo Digital de Niterói junta dados oficiais em tempo real para planejar e monitorar a cidade. Eu cuido do trânsito e do NitBike.`,
-      hud: `<ol class="cap-layers">${lay.slice().reverse().map((l, i) => `<li class="${l.mine ? "mine" : ""}" data-layer="${LN - 1 - i}" tabindex="0"><b>${l.name}</b> ${l.source}</li>`).join("")}</ol>
+      hud: `<ol class="cap-layers">${lay.slice().reverse().map((l, i) => `<li class="${l.mine ? "mine" : ""}" data-layer="${LN - 1 - i}" tabindex="0"><span><b>${l.name}</b> ${l.source}</span></li>`).join("")}</ol>
         <a class="pill pill-line" href="https://gemeo.niteroi.rj.gov.br/" target="_blank" rel="noopener noreferrer">Abrir o Gêmeo Digital ↗</a>
         <p class="cap-note">Posições reais das camadas públicas, no recorte do Centro e de Icaraí. Trânsito e bikes lidos agora; prédios do OpenStreetMap, com a altura exagerada. São ilustrativos os ônibus andando e a altura e as gotas da chuva.</p>`, keep: true },
   ];
@@ -1591,8 +1591,8 @@
   // 00: a câmera desce até o Centro enquanto a abertura fica grudada; o texto sai antes
   ScrollTrigger.create({ trigger: ".hero", start: "top top", end: "bottom bottom", onUpdate: s => { heroP = s.progress; if (heroP > 0.5) heroArm = true; camera(heroP); } });
   gsap.to(".hero-copy", { yPercent: -18, opacity: 0, ease: "none", scrollTrigger: { trigger: ".hero", start: "top top", end: "28% top", scrub: true } });
-  // as três linhas da manchete saem em velocidades diferentes, abrindo como um leque
-  [-5, 3, 9].forEach((x, i) => gsap.to(`.hero-name .ln:nth-child(${i + 1})`, { xPercent: x, ease: "none", scrollTrigger: { trigger: ".hero", start: "top top", end: "28% top", scrub: true } }));
+  // as duas linhas do nome saem em velocidades diferentes, abrindo como um leque
+  [-4, 6].forEach((x, i) => gsap.to(`.hero-name .ln:nth-child(${i + 1})`, { xPercent: x, ease: "none", scrollTrigger: { trigger: ".hero", start: "top top", end: "28% top", scrub: true } }));
 
   // 02 + 03: a viagem inteira é um número só
   tripST = ScrollTrigger.create({ trigger: tripRun, start: "top top", end: "bottom bottom", onUpdate: s => tripTo(s.progress) });
