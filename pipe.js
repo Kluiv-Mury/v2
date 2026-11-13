@@ -286,7 +286,9 @@ export function createPipe({ canvas, labels, reduce, stations = [], on = {}, map
     if (!el) return;
     v.copy(a).project(camera);
     const x = (v.x * 0.5 + 0.5) * W, y = (-v.y * 0.5 + 0.5) * H, off = v.z > 1 || x < -40 || x > W + 40;
-    el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
+    // centrada no ponto, mas sem sair pela borda da cena
+    const hw = (el._hw || (el._hw = el.offsetWidth / 2)) + 6, cx = el._hw && W > hw * 2 ? Math.min(W - hw, Math.max(hw, x)) : x;
+    el.style.transform = `translate3d(${cx.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
     el.style.opacity = off ? "0" : "";
   };
   let info = null, lastN = -1, lastR = -1, preN = -1;

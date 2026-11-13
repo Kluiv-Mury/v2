@@ -437,10 +437,10 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
   const KEYS = [
     { p: [0, 2.4, 13.5], t: [0, 0, 0] },
     { p: [0, 5.6, 10.5], t: [0, 0, 0] },
-    { p: [8.6, 4.4, 8.6], t: [0, 0.3, 0] },
+    { p: [10.5, 5.3, 10.5], t: [0, 0.3, 0] },   // um pouco mais longe: o cubo do banco não passa por cima do texto
     { p: [0.2, 13.5, 3.4], t: [0.2, 0, 0.3] },
     { p: [-3.4, 6.4, 9.6], t: [0.2, 0.5, 0] },
-    { p: [crop.cx + 6.6, 6.9, crop.cz + 7.6], t: [crop.cx, 1.45, crop.cz] },
+    { p: [crop.cx + 7.9, 8, crop.cz + 9.1], t: [crop.cx, 1.45, crop.cz] },   // mais longe: sobra margem à direita para as etiquetas e a lâmina de cima não entra no cabeçalho
   ];
   const vp = new THREE.Vector3(), vt = new THREE.Vector3(), va = new THREE.Vector3(), vb = new THREE.Vector3(), proj = new THREE.Vector3();
   let W = 1, H = 1, pull = 1, narrow = false, dprMax = 1, dpr = 1;

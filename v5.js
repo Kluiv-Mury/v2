@@ -60,14 +60,24 @@
   // os capítulos do case (caminho, pipeline e laboratório) acendem o mesmo item da navegação
   const navOf = { caminho: "case", pipeline: "case", lab: "case", trajetoria: "trajetoria", projetos: "projetos", contato: "contato" };
   const navLinks = $$("[data-nav]");
-  const chapIO = new IntersectionObserver(es => es.forEach(e => {
-    if (!e.isIntersecting) return;
-    chapN.textContent = e.target.dataset.chap; chapT.textContent = e.target.dataset.title;
-    bar.classList.toggle("named", e.target.id !== "topo");
-    const cur = navOf[e.target.id];
+  // quem manda no cabeçalho é a última seção cujo topo já passou da linha dos 45% da tela. O observador só avisa
+  // que alguma seção cruzou a linha: decidir pela que "entrou" errava na volta, quando duas seções se sobrepõem
+  const chaps = $$("[data-chap]");
+  let chapNow = null, chapTrip = null;   // chapTrip: a viagem troca de 02 para 03 por dentro e repõe o dela
+  const chapPick = () => {
+    const line = innerHeight * 0.45;
+    let t = chaps[0];
+    chaps.forEach(s => { if (s.getBoundingClientRect().top <= line) t = s; });
+    if (t === chapNow) return;
+    chapNow = t;
+    chapN.textContent = t.dataset.chap; chapT.textContent = t.dataset.title;
+    bar.classList.toggle("named", t.id !== "topo");
+    const cur = navOf[t.id];
     navLinks.forEach(a => { if (a.dataset.nav === cur) a.setAttribute("aria-current", "true"); else a.removeAttribute("aria-current"); });
-  }), { rootMargin: "-45% 0px -54% 0px" });
-  $$("[data-chap]").forEach(s => chapIO.observe(s));
+    if (t.id === "caminho" && chapTrip) chapTrip(true);
+  };
+  const chapIO = new IntersectionObserver(chapPick, { rootMargin: "-45% 0px -54% 0px" });
+  chaps.forEach(s => chapIO.observe(s));
 
   /* ---------- 00 · o mapa e as estações ao vivo ---------- */
   const GEO = { lon0: -43.1622, lon1: -42.935, lat0: -22.9791, lat1: -22.851, w: 2000, h: 1225 };
@@ -542,7 +552,8 @@
     });
     // a barra de cima troca de capítulo quando as camadas se separam
     const n = p >= 0.55 ? "03" : "02";
-    if (tripSeen && chapN.textContent !== n) { chapN.textContent = n; chapT.textContent = n === "03" ? "Camadas" : "O caminho do dado"; }
+    chapTrip = force => { if ((tripSeen || force) && chapN.textContent !== n) { chapN.textContent = n; chapT.textContent = n === "03" ? "Camadas" : "O caminho do dado"; } };
+    chapTrip();
   };
   railBtns.forEach((b, i) => b.addEventListener("click", () => {
     if (!tripST) return;
@@ -637,7 +648,7 @@
       if (live.length >= 12) return setJams(live, "agora");
       return fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, `retrato · ${new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date(s.retrato))}`));
     }).catch(() => fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, "retrato")).catch(() => {}));
-    import("./scene.js?v=202611111620").then(m => {
+    import("./scene.js?v=202611131200").then(m => {
       trip = m.createTrip({ canvas: $("#tripGL"), stations: [...stations.values()], term, geo: window.KMGEO || { cams: [], gauges: [], routes: [] }, layers: lay, mapSrc: "mapa-niteroi.svg", tagEls: tripTags, onFocus: userLayer });
       trip.setBikes(); if (wazePts) trip.setWaze(wazePts); if (jams) paintJams();
       tripTo(tripP);
@@ -728,6 +739,7 @@
     box.innerHTML = s.log ? s.log().map(([f, lv, m]) => `<p><b>${f}</b>${lv ? ` <i class="${lv === "OK" ? "ok" : ""}">${lv}</i>` : ""} ${fill(m)}</p>`).join("") : "";
     if (s.big) pipeBig();
   };
+  let pfPan = () => {};
   const pipeStep = k => {
     if (k === pipeAt) return; pipeAt = k;
     const s = STEPS[k];
@@ -736,6 +748,7 @@
     pnodes.forEach(n => { const on = s.n.includes(n.dataset.n); n.classList.toggle("on", on && !s.stats); n.classList.toggle("dim", !on); });
     pedges.forEach(e => e.classList.toggle("on", s.e.includes(e.dataset.e)));
     if (pipe) { pipe.pose(s.pose); pipe.look(s.look); }
+    pfPan();
     pipeLog();
   };
   // números ao vivo dos passos: linhas no banco, contagem até a próxima publicação, o total real de bikes
@@ -821,7 +834,24 @@
     if (lenis) lenis.scrollTo(y, { duration: 1 }); else scrollTo({ top: y, behavior: "smooth" });
   }));
   // o fluxograma tem um tamanho de desenho fixo e é encaixado na largura disponível
-  const pfFit = () => { const k = Math.min(1, pf.parentElement.clientWidth / 1240); pf.style.transform = `scale(${k.toFixed(4)})`; pf.parentElement.style.height = `${Math.round(310 * k)}px`; };
+  // Na tela estreita ele não cabe legível: fica num tamanho que dá para ler e uma janela anda até os nós do passo
+  const PF_K = 0.8, PF_H = 132;
+  let pfNarrow = false;
+  pfPan = () => {
+    if (!pfNarrow) return;
+    const s = STEPS[Math.max(0, pipeAt)] || STEPS[0], ns = (s.stats || (s.n || []).length > 3 ? ["api", "coleta"] : s.n || []).map(n => NODES[n]).filter(Boolean);
+    const xs = ns.length ? ns.map(n => n[0] + 62) : [620], ys = ns.length ? ns.map(n => n[1] + 33) : [73];
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2, cw = pf.parentElement.clientWidth;
+    const tx = Math.min(8, Math.max(cw - 1240 * PF_K - 8, cw / 2 - cx * PF_K)), ty = Math.min(10, Math.max(PF_H - 310 * PF_K, PF_H / 2 - cy * PF_K));
+    pf.style.transform = `translate3d(${tx.toFixed(1)}px, ${ty.toFixed(1)}px, 0) scale(${PF_K})`;
+  };
+  const pfFit = () => {
+    const box = pf.parentElement, cw = box.clientWidth;
+    pfNarrow = cw < 700;
+    box.classList.toggle("pan", pfNarrow); pf.classList.toggle("pan", pfNarrow);
+    if (pfNarrow) { box.style.height = `${PF_H}px`; pfPan(); return; }
+    const k = Math.min(1, cw / 1240); pf.style.transform = `scale(${k.toFixed(4)})`; box.style.height = `${Math.round(310 * k)}px`;
+  };
   pfFit(); addEventListener("resize", pfFit);
   // ocupação de cada estação na última leitura, na ordem da grade (13 colunas × 5 linhas)
   const pipeFill = () => pipe && pipe.setFill([...stations.values()].map(s => (s.bikes + s.free) ? s.bikes / (s.bikes + s.free) : null));
@@ -840,7 +870,7 @@
     let asked = false, seen = false;
     const loadPipe = () => {
       if (asked) return; asked = true;
-      import("./pipe.js?v=202611111620").then(m => {
+      import("./pipe.js?v=202611131200").then(m => {
         pipe = m.createPipe({ canvas: $("#pipeGL"), labels: lbl, reduce, stations: [...stations.values()].map(s => [s.x / 100, s.y / 100]), on: pipeOn });
         pipeFill(); pipe.pose(STEPS[Math.max(0, pipeAt)].pose); pipe.look(STEPS[Math.max(0, pipeAt)].look); pipe.setSpeed(pipeSpeed); pipeLid();
         if (seen) pipe.start();
@@ -1270,7 +1300,7 @@
   let sDim = [], sFrom = null, sM = 0, sT = 0, sL = 0, sLT = 0, sAng = 0, sRaf = 0, sLast = 0, sR = 200, sC = [0, 0];
   const sMeasure = () => {
     const g = graph.getBoundingClientRect(), sc = g.width / graph.offsetWidth || 1;
-    sR = wide() ? Math.min(graph.offsetWidth * 0.36, graph.offsetHeight * 0.4) : Math.min(graph.offsetWidth * 0.36, graph.offsetHeight * 0.42);
+    sR = wide() ? Math.min(graph.offsetWidth * 0.36, graph.offsetHeight * 0.4) : Math.min(graph.offsetWidth * 0.46, graph.offsetHeight * 0.42);
     [sRim, sEq, sCore].forEach(el => { el.style.width = el.style.height = `${(sR * 2).toFixed(0)}px`; });
     sHalo.style.width = sHalo.style.height = `${(sR * 3.4).toFixed(0)}px`;
     // posição de partida: o centro de cada botão, medido a partir da origem da esfera (e não do centro do grafo)
@@ -1495,10 +1525,14 @@
       const e = soft(cl((sM - 0.14 - A.d) / 0.56));
       const phi = lerp(A.phi0, A.phi1, e), r = lerp(A.r0, A.r1, e), p = sProj(sFib[A.q], sAng);
       const px = A.sx * Math.cos(phi) * r + (p[0] - A.p0[0]) * e - A.off, py = Math.sin(phi) * r + (p[1] - A.p0[1]) * e;
-      const sc2 = 1 + (p[3] - 1) * e;
+      // profundidade: quem está atrás fica menor, bem mais apagado e por baixo de quem está na frente, para os
+      // nomes dos dois lados da esfera não se misturarem (na tela estreita, onde há menos espaço, mais ainda)
+      const dz = (p[2] + 1) / 2, back = 1 - Math.pow(dz, 1.5), nar = !wide();
+      const sc2 = (1 + (p[3] - 1) * e) * (1 - e * ((nar ? 0.4 : 0.3) * back + (nar ? 0.12 : 0)));
       sEls[i].style.transform = `translate3d(${px.toFixed(1)}px, ${py.toFixed(1)}px, 0) translate(-50%, -50%) scale(${sc2.toFixed(3)})`;
+      sEls[i].style.zIndex = e > 0.3 ? String(Math.round(dz * 100)) : "";
       const dim0 = sDim[i] == null ? 1 : sDim[i];
-      sEls[i].style.opacity = ((1 - e * (0.62 - 0.62 * (p[2] + 1) / 2)) * fade * (dim0 + (1 - dim0) * ss(0, 0.5, Math.max(e, 1 - chrome)))).toFixed(3);
+      sEls[i].style.opacity = ((1 - e * (nar ? 0.95 : 0.88) * back) * fade * (dim0 + (1 - dim0) * ss(0, 0.5, Math.max(e, 1 - chrome)))).toFixed(3);
       sPill[i].style.opacity = sNum[i].style.opacity = chrome.toFixed(3);
       sEls[i].classList.toggle("lit", chrome < 0.5);
     }

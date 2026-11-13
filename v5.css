@@ -214,6 +214,9 @@ p { margin: 0; }
 .pipe-stage { position: sticky; top: 0; height: 100svh; overflow: hidden; background: radial-gradient(120% 80% at 70% 100%, #1a1713 0%, var(--ink) 60%); }
 .pf-box { position: absolute; left: 50%; top: calc(var(--bar-h) + 1.2vh); width: min(1180px, calc(100% - var(--gut) * 2)); transform: translateX(-50%); }
 .pf { position: absolute; left: 50%; top: 0; width: 1240px; height: 310px; margin-left: -620px; transform-origin: 50% 0; }
+/* tela estreita: o fluxograma fica legível e a janela anda até os nós do passo (v5.js, pfPan) */
+.pf-box.pan { overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%); mask-image: linear-gradient(90deg, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%); }
+.pf.pan { left: 0; margin-left: 0; transform-origin: 0 0; transition: transform .7s var(--ease); }
 .pf-lines { position: absolute; inset: 0; width: 1240px; height: 310px; overflow: visible; }
 .pf-e { fill: none; stroke: #3a3631; stroke-width: 1.4; transition: stroke .35s ease; }
 .pf-e.dash { stroke-dasharray: 3 5; }
@@ -260,13 +263,13 @@ p { margin: 0; }
 .pcap-big small { grid-column: 1 / -1; color: var(--mute-2); font: 400 .72rem var(--f-mono); margin-top: .5rem; }
 .pcap-log .up { color: var(--lime); }
 .pcap-log .dn { color: #ff6a5a; }
-.pipe-caps { position: absolute; left: var(--gut); bottom: clamp(56px, 8vh, 84px); width: min(440px, 32vw); display: grid; }
+.pipe-caps { position: absolute; left: var(--gut); bottom: clamp(56px, 8vh, 84px); width: min(470px, 33vw); display: grid; }
 .pcap { grid-area: 1 / 1; align-self: end; opacity: 0; visibility: hidden; transform: translate3d(0, 18px, 0); transition: opacity .4s ease, transform .7s var(--ease), visibility 0s .4s; }
 .pcap.on { opacity: 1; visibility: visible; transform: none; transition: opacity .5s ease .08s, transform .8s var(--ease) .08s, visibility 0s; }
 .pcap .eyebrow { margin-bottom: .8rem; }
-.pcap h3 { font: 750 clamp(1.9rem, 3.1vw, 3rem)/.95 var(--f-display); font-variation-settings: "wdth" 84, "opsz" 96; letter-spacing: -.03em; }
+.pcap h3 { font: 750 clamp(2.1rem, 3.7vw, 3.7rem)/.95 var(--f-display); font-variation-settings: "wdth" 84, "opsz" 96; letter-spacing: -.03em; }
 .pcap-k { margin: .55rem 0 .9rem; color: var(--mute-2); font: 500 .72rem var(--f-mono); letter-spacing: .06em; }
-.pcap-p { color: var(--mute); font-size: clamp(.95rem, 1.05vw, 1.04rem); line-height: 1.6; }
+.pcap-p { color: var(--mute); font-size: clamp(1rem, 1.18vw, 1.15rem); line-height: 1.6; }
 .pcap-st { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem 1.4rem; margin: 1.2rem 0 0; }
 .pcap-st dt { font: 700 1.5rem var(--f-display); color: var(--cream); }
 .pcap-st dd { margin: 0; color: var(--mute-2); font-size: .78rem; }
@@ -290,16 +293,18 @@ p { margin: 0; }
 @media (max-width: 860px) {
   .pipe-run { height: 820svh; }
   .pf-box { top: calc(var(--bar-h) + 6px); }
-  #pipeGL, .pipe-lbl { left: 0; width: 100%; top: 21%; height: 42%; }
+  #pipeGL, .pipe-lbl { left: 0; width: 100%; top: 25%; height: 36%; }
   .pipe-lbl i { display: none; }
   .pipe-lbl [data-k="gemeo"], .pipe-lbl [data-k="arcgis"] { display: none; }
-  .pipe-caps { left: var(--gut); right: var(--gut); width: auto; bottom: 64px; }
+  .pipe-caps { left: var(--gut); right: var(--gut); width: auto; bottom: 64px; isolation: isolate; }
+  /* um véu atrás do texto: nos passos mais longos ele sobe até a base da caixa 3D */
+  .pipe-caps::before { content: ""; position: absolute; z-index: -1; inset: -56px calc(var(--gut) * -1) -8px; background: linear-gradient(0deg, var(--ink) 72%, rgba(14, 13, 11, 0)); pointer-events: none; }
   .pcap h3 { font-size: clamp(1.6rem, 7vw, 2.2rem); }
   .pcap-p { font-size: .9rem; line-height: 1.5; }
   .pcap-st { display: none; }
   .pcap-note { display: none; }
   .pipe-dots { left: var(--gut); right: auto; }
-  .pipe-speed { top: calc(21% + 6px); bottom: auto; right: var(--gut); }
+  .pipe-speed { top: calc(25% + 6px); bottom: auto; right: var(--gut); }
   .pipe-speed span { display: none; }
   .pipe-speed button { min-width: 40px; height: 28px; }
 }
@@ -634,8 +639,8 @@ p { margin: 0; }
 .graph.morph .link { visibility: hidden; transition: none; }
 .g-fx { position: absolute; pointer-events: none; opacity: 0; mix-blend-mode: screen; }
 .graph.morph .g-fx { opacity: 1; }
-.comet { fill: none; stroke: var(--lime); stroke-width: 2.4; stroke-linecap: round; stroke-dasharray: .07 1.2; stroke-dashoffset: .07; pointer-events: none; }
-.comet.halo { stroke: rgba(230, 255, 87, .22); stroke-width: 9; }
+.comet { fill: none; stroke: #ffe2c8; stroke-width: 2.4; stroke-linecap: round; stroke-dasharray: .07 1.2; stroke-dashoffset: .07; pointer-events: none; }
+.comet.halo { stroke: rgba(var(--orange-rgb), .32); stroke-width: 9; }
 .g-col { grid-row: 1; display: grid; gap: 8px; align-content: center; }
 .g-col button { display: flex; align-items: center; gap: .6rem; min-height: 40px; padding: .35rem .9rem; border: 1px solid var(--line); border-radius: 999px; background: var(--ink-2); cursor: pointer; text-align: left; opacity: 0; transform: translateX(var(--dx)); transition: opacity .5s calc(var(--k) * 28ms), transform .7s var(--ease) calc(var(--k) * 28ms); }
 .graph.in .g-col button { opacity: 1; transform: none; }
