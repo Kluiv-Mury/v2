@@ -515,7 +515,10 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
     sx += (mx - sx) * 0.05; sy += (my - sy) * 0.05;
     // a câmera respira; nas camadas ela gira devagar em volta da pilha
     const orbit = Math.sin(time * 0.16) * (0.06 + 0.2 * ss(4.2, 5, state)) + sx * 0.16;
-    vp.sub(vt).multiplyScalar(pull).applyAxisAngle(camera.up, orbit).add(vt);
+    // tela estreita: quando as camadas se separam a pilha recua e desliza para a direita, abrindo uma coluna
+    // à esquerda para as etiquetas (antes elas caíam em cima do desenho)
+    if (narrow) camera.setViewOffset(W, H, -W * 0.2 * e, H * 0.15, W, H);
+    vp.sub(vt).multiplyScalar(pull * (narrow ? 1 + 0.22 * e : 1)).applyAxisAngle(camera.up, orbit).add(vt);
     vp.y += sy * -0.5;
     camera.position.copy(vp); camera.lookAt(vt);
 
@@ -559,7 +562,7 @@ export function createTrip({ canvas, stations, term, geo, layers, mapSrc, tagEls
         // à direita da lâmina quando cabe; se não, encostada no canto de trás, por dentro da tela
         proj.set(narrow ? crop.x0 : crop.x1, k * GAP * e + up[k] * e, narrow ? crop.z1 : crop.z0).project(camera);
         let x = (proj.x * 0.5 + 0.5) * W, y = (-proj.y * 0.5 + 0.5) * H, dx = narrow ? "-4px" : "14px";
-        if (narrow) x = Math.max(x, 14);
+        if (narrow) { x = Math.max(x, (el._w2 || (el._w2 = el.offsetWidth)) + 14); dx = "calc(-100% - 8px)"; }
         else if (x + (el._w || (el._w = el.offsetWidth + 70)) > W) { x = Math.min(x, W - 16); dx = "calc(-100% - 14px)"; y -= 14; }
         el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) translate(${dx}, -50%)`;
         el.style.opacity = (tagO * (0.3 + 0.7 * hl[k])).toFixed(3);

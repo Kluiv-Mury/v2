@@ -467,6 +467,16 @@
     requestAnimationFrame(step);
   }), { threshold: 0.6 });
   if (!reduce) $$("#whoStats b").forEach(b => countIO.observe(b));
+  // a seção entra em ordem: o rótulo, os fatos de cima para baixo e os três números (70 ms entre um e outro)
+  if (!reduce) {
+    const who = $(".who");
+    // cada peça entra quando ela mesma aparece (no celular a seção é mais alta que a tela); o atraso em
+    // escada recomeça nos números, para ninguém esperar por quem já entrou
+    const parts = [[$(".eyebrow", who), ...$$("#whoFacts div")], $$("#whoStats div")];
+    const whoIO = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add("rin"); whoIO.unobserve(e.target); } }), { threshold: 0.2 });
+    parts.forEach(g => g.forEach((el, k) => { if (!el) return; el.style.setProperty("--k", k); whoIO.observe(el); }));
+    who.classList.add("rv");
+  }
 
   /* ---------- 02 · o caminho do dado ---------- */
   // UTM zona 23 Sul (SIRGAS 2000 / EPSG 31983), a conversão que o update_arcgis faz antes de gravar na camada
@@ -648,7 +658,7 @@
       if (live.length >= 12) return setJams(live, "agora");
       return fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, `retrato · ${new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date(s.retrato))}`));
     }).catch(() => fetch("transito-retrato.json").then(r => r.json()).then(s => setJams(s.trechos, "retrato")).catch(() => {}));
-    import("./scene.js?v=202611131200").then(m => {
+    import("./scene.js?v=202611131700").then(m => {
       trip = m.createTrip({ canvas: $("#tripGL"), stations: [...stations.values()], term, geo: window.KMGEO || { cams: [], gauges: [], routes: [] }, layers: lay, mapSrc: "mapa-niteroi.svg", tagEls: tripTags, onFocus: userLayer });
       trip.setBikes(); if (wazePts) trip.setWaze(wazePts); if (jams) paintJams();
       tripTo(tripP);
@@ -1624,9 +1634,9 @@
 
   // 00: a câmera desce até o Centro enquanto a abertura fica grudada; o texto sai antes
   ScrollTrigger.create({ trigger: ".hero", start: "top top", end: "bottom bottom", onUpdate: s => { heroP = s.progress; if (heroP > 0.5) heroArm = true; camera(heroP); } });
-  gsap.to(".hero-copy", { yPercent: -18, opacity: 0, ease: "none", scrollTrigger: { trigger: ".hero", start: "top top", end: "28% top", scrub: true } });
+  gsap.to(".hero-copy", { yPercent: -18, opacity: 0, ease: "none", scrollTrigger: { trigger: ".hero", start: "top top", end: "42% top", scrub: true } });
   // as duas linhas do nome saem em velocidades diferentes, abrindo como um leque
-  [-4, 6].forEach((x, i) => gsap.to(`.hero-name .ln:nth-child(${i + 1})`, { xPercent: x, ease: "none", scrollTrigger: { trigger: ".hero", start: "top top", end: "28% top", scrub: true } }));
+  [-4, 6].forEach((x, i) => gsap.to(`.hero-name .ln:nth-child(${i + 1})`, { xPercent: x, ease: "none", scrollTrigger: { trigger: ".hero", start: "top top", end: "42% top", scrub: true } }));
 
   // 02 + 03: a viagem inteira é um número só
   tripST = ScrollTrigger.create({ trigger: tripRun, start: "top top", end: "bottom bottom", onUpdate: s => tripTo(s.progress) });
